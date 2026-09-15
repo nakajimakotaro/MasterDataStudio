@@ -1,5 +1,7 @@
 import { themeQuartz, type ColDef } from "ag-grid-community";
 
+const cellCollator = new Intl.Collator("ja", { numeric: true });
+
 export const masterGridTheme = themeQuartz.withParams({
   accentColor: "#437565",
   backgroundColor: "#ffffff",
@@ -26,6 +28,9 @@ export function masterColumn<T>(column: string, primaryKey: string[]): ColDef<T>
     lockPinned: true,
     lockPosition: pk ? "left" : undefined,
     cellDataType: "text",
+    comparator: (a, b) => cellCollator.compare(String(a ?? ""), String(b ?? "")),
+    initialSort: pk ? "asc" : undefined,
+    initialSortIndex: pk ? primaryKey.indexOf(column) : undefined,
     cellClass: pk ? "pk-cell" : undefined,
     headerClass: pk ? "pk-header" : undefined,
     minWidth: pk ? 135 : 140,
