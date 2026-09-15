@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
 import {
   type ColDef,
+  type GetContextMenuItems,
   type GridApi,
   type ProcessDataFromClipboardParams,
 } from "ag-grid-community";
@@ -173,6 +174,48 @@ export function Editor({
     return null;
   };
 
+  const contextMenuItems: GetContextMenuItems<GridRow> = (params) => {
+    const node = params.node;
+    const row = node?.data;
+    // Right-clicking outside the selection targets that row. Within a
+    // selection, retain all selected rows for bulk deletion.
+    if (node && row && !node.isSelected()) node.setSelected(true, true);
+    const selectedKeys = params.api.getSelectedRows().map((r) => r.key);
+    const column = columnName(params.column?.getColId() ?? "");
+    const cell = row && master.table.columns.includes(column)
+      ? { primaryKey: row.key, column }
+      : null;
+    if (row) ui.set({ selectedKeys, cell });
+
+    return [
+      {
+        name: "Row を追加",
+        disabled: !editable,
+        action: () => ui.set({ dialog: "addRow" }),
+      },
+      {
+        name: "この Row を複製",
+        disabled: !editable || !row,
+        action: () => {
+          if (!node || !row) return;
+          node.setSelected(true, true);
+          ui.set({ selectedKeys: [row.key], cell, dialog: "duplicateRow" });
+        },
+      },
+      {
+        name: selectedKeys.length > 1
+          ? `選択した ${selectedKeys.length} 件の Row を削除`
+          : "この Row を削除",
+        disabled: !editable || !row,
+        action: () => {
+          if (!row) return;
+          ui.set({ selectedKeys, cell, dialog: "deleteRows" });
+        },
+      },
+      ...(row ? ["separator", "copy", "copyWithHeaders"] as const : []),
+    ];
+  };
+
   useEffect(() => {
     const keys = new Set(rowData.map((row) => keyId(row.key)));
     const state = useUI.getState();
@@ -324,6 +367,16 @@ export function Editor({
       </div>
       <div className="editor-content">
         <div className="grid-panel">
+          <div className="table-comment">
+            <CommentBox
+              key={`table:${masterId}:${master.comments.table?.body}`}
+              label="Table Comment"
+              comment={master.comments.table}
+              masterId={masterId}
+              target={{ kind: "table" }}
+              editable={editable}
+            />
+          </div>
           <div className="grid-hint">
             <span>
               <KeyRound size={13} />
@@ -423,7 +476,8 @@ export function Editor({
               readOnlyEdit
               stopEditingWhenCellsLoseFocus
               suppressCutToClipboard
-              suppressContextMenu
+              getContextMenuItems={contextMenuItems}
+              allowContextMenuWithControlKey
               cellSelection={{ suppressMultiRanges: false }}
               rowSelection={{ mode: "multiRow", enableClickSelection: false }}
               selectionColumnDef={{
@@ -494,10 +548,6 @@ export function Editor({
             master={master}
             def={def}
             editable={editable}
-            onSelectTable={() => {
-              api?.deselectAll();
-              ui.set({ cell: null, selectedKeys: [] });
-            }}
           />
         )}
       </div>
@@ -510,13 +560,11 @@ function Inspector({
   master,
   def,
   editable,
-  onSelectTable,
 }: {
   masterId: string;
   master: Master;
   def: Definition;
   editable: boolean;
-  onSelectTable: () => void;
 }) {
   const ui = useUI();
   const key =
@@ -539,9 +587,6 @@ function Inspector({
       <div className="inspector-heading">
         <MessageSquare size={16} />
         <h2>Inspector</h2>
-        <button title="Table を選択" onClick={onSelectTable}>
-          Table
-        </button>
       </div>
       <section className="selection-details">
         <div className="eyebrow">SELECTION</div>
@@ -572,14 +617,6 @@ function Inspector({
           </p>
         )}
       </section>
-      <CommentBox
-        key={`table:${masterId}:${master.comments.table?.body}`}
-        label="Table Comment"
-        comment={master.comments.table}
-        masterId={masterId}
-        target={{ kind: "table" }}
-        editable={editable}
-      />
       {key && row && (
         <CommentBox
           key={`row:${keyId(key)}:${rowComment?.body}`}
@@ -652,8 +689,10 @@ function CommentBox({
               e.currentTarget.blur();
             }
           }}
-          placeholder="コメントを追加…"
-          rows={3}
+          placeholder={target.kind === "table"
+            ? "テーブルの説明を追加…（入力欄を離れると自動保存）"
+            : "コメントを追加…"}
+          rows={target.kind === "table" ? 2 : 3}
         />
       </label>
       {comment && (

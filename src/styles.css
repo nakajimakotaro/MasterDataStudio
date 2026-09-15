@@ -1005,6 +1005,33 @@ button.icon-button {
   font-size: 9px;
   color: #a99a93;
 }
+.table-comment {
+  flex-shrink: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fcfdfc;
+}
+.table-comment .comment-box {
+  padding: 12px 18px;
+}
+.table-comment textarea {
+  min-height: 52px;
+  margin-top: 0;
+  padding: 6px 10px;
+}
+.table-comment .comment-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 20px;
+  padding-top: 8px;
+}
+.table-comment .comment-metadata > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 0;
+}
 .inspector-note {
   padding: 20px;
   font-size: 9px;
