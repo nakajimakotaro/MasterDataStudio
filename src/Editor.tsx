@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
 import {
   type ColDef,
   type GetContextMenuItems,
   type GridApi,
+  type GridOptions,
   type ProcessDataFromClipboardParams,
 } from "ag-grid-community";
 import {
@@ -41,6 +42,38 @@ const emptyDrafts: DraftRow[] = [];
 // Keep arbitrary user column names separate from AG Grid's internal column IDs.
 const columnName = (id: string) => (id.startsWith("data:") ? id.slice(5) : "");
 
+// Selection updates must not rebuild columns or re-sort the grid: doing so can
+// remove the cell anchoring an open context menu and immediately close it.
+const editorGridOptions: Pick<GridOptions<GridRow>,
+  "cellSelection" | "rowSelection" | "selectionColumnDef" | "postSortRows" | "getRowId"
+> = {
+  cellSelection: { suppressMultiRanges: false },
+  rowSelection: {
+    mode: "multiRow",
+    enableClickSelection: true,
+    selectAll: "filtered",
+    ctrlASelectsRows: true,
+  },
+  selectionColumnDef: {
+    pinned: "left",
+    width: 44,
+    maxWidth: 44,
+    resizable: false,
+    suppressHeaderMenuButton: true,
+    headerTooltip: "検索・フィルターに一致する全行を選択 / 解除",
+  },
+  postSortRows: ({ nodes }) => {
+    // Keep saved rows sorted normally, and append drafts in creation order.
+    nodes.sort((a, b) => {
+      const aDraft = !!a.data?.draft;
+      const bDraft = !!b.data?.draft;
+      if (aDraft && bDraft) return a.sourceRowIndex - b.sourceRowIndex;
+      return Number(aDraft) - Number(bDraft);
+    });
+  },
+  getRowId: (p) => keyId(p.data.key),
+};
+
 export function Editor({
   project,
   masterId,
@@ -57,26 +90,35 @@ export function Editor({
   const [visibleRows, setVisibleRows] = useState(master.table.rows.length);
   const [fillValue, setFillValue] = useState<string | null>(null);
   const [rangeCount, setRangeCount] = useState(0);
-  const newRowKey = useRef<string | null>(null);
+  const newRowKeys = useRef<string[]>([]);
   const grid = useRef<AgGridReact<GridRow>>(null);
   const def = project.data.config.masters[masterId];
   const editable = !!project.identity.name && !!project.identity.email && !project.git.protected && !project.git.mergeInProgress && !busy;
   const draftScope = JSON.stringify([project.root, project.git.branch, masterId]);
   const drafts = ui.drafts[draftScope] ?? emptyDrafts;
-  const setDrafts = (rows: typeof drafts) =>
-    ui.set({ drafts: { ...useUI.getState().drafts, [draftScope]: rows } });
+  const setDrafts = useCallback((rows: DraftRow[]) => {
+    const state = useUI.getState();
+    state.set({ drafts: { ...state.drafts, [draftScope]: rows } });
+  }, [draftScope]);
   const rowData = useMemo<GridRow[]>(() => [
     ...master.table.rows.map((values) => ({ key: rowKey(values, master, def), values })),
     ...drafts.map((row) => ({ key: row.key, values: master.table.columns.map(c => row.cells[c] ?? ""), draft: true })),
   ], [master.table, def, drafts]);
-  const addRow = (source?: GridRow) => {
-    if (!editable) return;
-    const key = ["draft", crypto.randomUUID()];
-    newRowKey.current = keyId(key);
-    setDrafts([...drafts, { key, cells: Object.fromEntries(master.table.columns.map((c, i) =>
-      [c, source?.values[i] ?? ""])) }]);
-    ui.set({ search: "", selectedKeys: [key], cell: null });
+  const addRows = (sources: Pick<GridRow, "values">[] = [{ values: [] }]) => {
+    if (!editable || !sources.length) return;
+    const added = sources.map((source) => ({
+      key: ["draft", crypto.randomUUID()],
+      cells: Object.fromEntries(master.table.columns.map((c, i) =>
+        [c, source.values[i] ?? ""])),
+    }));
+    newRowKeys.current = added.map(row => keyId(row.key));
+    setDrafts([...drafts, ...added]);
+    ui.set({ search: "", selectedKeys: added.map(row => row.key), cell: null });
     api?.setFilterModel(null);
+  };
+  const duplicateRows = (keys: PrimaryKey[]) => {
+    const ids = new Set(keys.map(keyId));
+    addRows(rowData.filter(row => ids.has(keyId(row.key))));
   };
   const deleteRows = (keys: PrimaryKey[]) => {
     const ids = new Set(keys.map(keyId));
@@ -90,7 +132,7 @@ export function Editor({
       rows: drafts.map(row => master.table.columns.map(c => row.cells[c] ?? "")),
     } }, { onSuccess: () => setDrafts([]) });
   };
-  const edit = (edits: CellEdit[]) => {
+  const edit = useCallback((edits: CellEdit[]) => {
     if (!editable || !edits.length) return;
     const isDraft = (e: CellEdit) => drafts.some(row => keyId(row.key) === keyId(e.primaryKey));
     if (edits.some((e) => !isDraft(e) && def.primaryKey.includes(e.column))) {
@@ -111,8 +153,8 @@ export function Editor({
       operation: { type: "editCells", masterId, edits: savedEdits },
     }, { onSuccess: updateDrafts });
     else updateDrafts();
-  };
-  const selectionEdits = (value: string, copyTopRow = false): CellEdit[] => {
+  }, [editable, drafts, def.primaryKey, ui.set, setDrafts, action.mutate, masterId]);
+  const selectionEdits = useCallback((value: string, copyTopRow = false): CellEdit[] => {
     if (!api) return [];
     const edits = new Map<string, CellEdit>();
     for (const range of api.getCellRanges() ?? []) {
@@ -140,7 +182,29 @@ export function Editor({
       }
     }
     return [...edits.values()];
-  };
+  }, [api, master.table.columns]);
+  const defaultColDef = useMemo<ColDef<GridRow>>(() => ({
+    sortable: true,
+    filter: "agTextColumnFilter",
+    resizable: true,
+    suppressMovable: true,
+    suppressKeyboardEvent: (p) => {
+      if (
+        !p.editing &&
+        (p.event.key === "Delete" || p.event.key === "Backspace")
+      ) {
+        edit(selectionEdits(""));
+        return true;
+      }
+      if (
+        !p.editing &&
+        (p.event.metaKey || p.event.ctrlKey) &&
+        p.event.key.toLowerCase() === "x"
+      )
+        return true;
+      return false;
+    },
+  }), [edit, selectionEdits]);
   const columnDefs = useMemo<ColDef<GridRow>[]>(() => {
     const order = [
       ...def.primaryKey,
@@ -209,7 +273,7 @@ export function Editor({
     const node = params.node;
     const row = node?.data;
     // Right-clicking outside the selection targets that row. Within a
-    // selection, retain all selected rows for bulk deletion.
+    // selection, retain all selected rows for bulk duplication and deletion.
     if (node && row && !node.isSelected()) node.setSelected(true, true);
     const selectedKeys = params.api.getSelectedRows().map((r) => r.key);
     const column = columnName(params.column?.getColId() ?? "");
@@ -222,15 +286,16 @@ export function Editor({
       {
         name: "Row を追加",
         disabled: !editable,
-        action: () => addRow(),
+        action: () => addRows(),
       },
       {
-        name: "この Row を複製",
+        name: selectedKeys.length > 1
+          ? `選択した ${selectedKeys.length} 件の Row を複製`
+          : "この Row を複製",
         disabled: !editable || !row,
         action: () => {
-          if (!node || !row) return;
-          node.setSelected(true, true);
-          addRow(row);
+          if (!row) return;
+          duplicateRows(selectedKeys);
         },
       },
       {
@@ -313,16 +378,18 @@ export function Editor({
         <div className="toolbar-group">
           <button
             disabled={!editable}
-            onClick={() => addRow()}
+            onClick={() => addRows()}
           >
             <Plus size={16} />
             Row 追加
           </button>
           <button
-            disabled={!editable || ui.selectedKeys.length !== 1}
-            title="選択した Row を複製"
+            disabled={!editable || !ui.selectedKeys.length}
+            title={ui.selectedKeys.length > 1
+              ? `選択した ${ui.selectedKeys.length} 件の Row を複製`
+              : "選択した Row を複製"}
             aria-label="Row を複製"
-            onClick={() => addRow(rowData.find(row => keyId(row.key) === keyId(ui.selectedKeys[0])))}
+            onClick={() => duplicateRows(ui.selectedKeys)}
           >
             <Copy size={16} />
           </button>
@@ -433,6 +500,9 @@ export function Editor({
               </button>
             </div>
           </div>
+          <div className="row-selection-hint">
+            行をクリック → Shift＋クリックで範囲選択 · ⌘/Ctrl＋クリックで個別選択 · 左上のチェックまたは⌘/Ctrl＋Aで表示中の全行を選択
+          </div>
           {fillValue !== null && (
             <form
               className="fill-bar"
@@ -482,62 +552,35 @@ export function Editor({
             }}
           >
             <AgGridReact<GridRow>
+              {...editorGridOptions}
               ref={grid}
               theme={masterGridTheme}
               rowData={rowData}
               columnDefs={columnDefs}
-              defaultColDef={{
-                sortable: true,
-                filter: "agTextColumnFilter",
-                resizable: true,
-                suppressMovable: true,
-                suppressKeyboardEvent: (p) => {
-                  if (
-                    !p.editing &&
-                    (p.event.key === "Delete" || p.event.key === "Backspace")
-                  ) {
-                    edit(selectionEdits(""));
-                    return true;
-                  }
-                  if (
-                    !p.editing &&
-                    (p.event.metaKey || p.event.ctrlKey) &&
-                    p.event.key.toLowerCase() === "x"
-                  )
-                    return true;
-                  return false;
-                },
-              }}
+              defaultColDef={defaultColDef}
               readOnlyEdit
               stopEditingWhenCellsLoseFocus
               suppressCutToClipboard
               getContextMenuItems={contextMenuItems}
               allowContextMenuWithControlKey
-              cellSelection={{ suppressMultiRanges: false }}
-              rowSelection={{ mode: "multiRow", enableClickSelection: false }}
-              selectionColumnDef={{
-                pinned: "left",
-                width: 44,
-                maxWidth: 44,
-                resizable: false,
-                suppressHeaderMenuButton: true,
-              }}
-              getRowId={(p) => keyId(p.data.key)}
               quickFilterText={ui.search}
               processDataFromClipboard={paste}
               onGridReady={(e) => setApi(e.api)}
-              onRowDataUpdated={(e) => {
-                if (!newRowKey.current) return;
-                const node = e.api.getRowNode(newRowKey.current);
-                if (!node) return;
-                newRowKey.current = null;
-                node.setSelected(true, true);
+              onModelUpdated={(e) => {
+                setVisibleRows(e.api.getDisplayedRowCount());
+                if (!newRowKeys.current.length) return;
+                const nodes = newRowKeys.current.flatMap(key => {
+                  const node = e.api.getRowNode(key);
+                  return node ? [node] : [];
+                });
+                if (nodes.length !== newRowKeys.current.length) return;
+                newRowKeys.current = [];
+                e.api.deselectAll();
+                e.api.setNodesSelected({ nodes, newValue: true });
+                const node = nodes[0];
                 e.api.ensureNodeVisible(node, "bottom");
                 if (node.rowIndex !== null) e.api.setFocusedCell(node.rowIndex, `data:${def.primaryKey[0]}`);
               }}
-              onModelUpdated={(e) =>
-                setVisibleRows(e.api.getDisplayedRowCount())
-              }
               onCellSelectionChanged={() =>
                 setRangeCount(selectionEdits("").length)
               }

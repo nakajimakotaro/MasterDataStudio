@@ -810,6 +810,12 @@ button.icon-button {
   color: #82958a;
   font-size: 10px;
 }
+.row-selection-hint {
+  padding: 7px 18px;
+  color: #63727c;
+  background: #f7f9fa;
+  font-size: 11px;
+}
 .ag-container {
   flex: 1;
   min-height: 150px;
