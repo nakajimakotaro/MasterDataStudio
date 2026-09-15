@@ -176,9 +176,20 @@ Phase 2 の Git status / Branch / Commit / Push / Fetch / Update / Change Review
 
 ### History
 
-サイドバーの **History** から現在の Branch のコミット履歴を 50 件ずつ読み込みます。日時・作者・Commit ID・メッセージを確認し、コミットを選ぶと Master / Row / Column / Cell / Comment / Project 設定の変更を表示します。変更詳細は Master ごとに絞り込めます。
+サイドバーの **History** から現在の Branch のコミット履歴を 50 件ずつ読み込みます。日時・作者・Commit ID・メッセージを確認し、コミットを選ぶと Master / Row / Column / Cell / Comment / Project 設定の変更を表示します。コミットメッセージ・作者で全履歴を検索でき、変更詳細は Master・種類・列・キーや値で絞り込めます。差分は変更前後の表を100件ずつ表示し、対象を選択すると値の全文を確認できます。
 
-Git の first-parent 履歴を表示し、Merge commit は先頭の親との差分、最初の commit は空の Project との差分を表示します。ページ送り中は最初に取得した HEAD を基準にします。履歴は Git snapshot から復元し、独自 database や Working Tree / Index の変更は行いません。壊れた snapshot は理由を表示します。Cell 単体の履歴検索は Later の対象です。
+Git の first-parent 履歴を表示し、Merge commit は先頭の親との差分、最初の commit は空の Project との差分を表示します。ページ送りは続きのコミットを指すカーソルを使用し、新しい HEAD が追加されても重複・取りこぼしなく前後に移動できます。「最新の履歴へ」で再取得します。履歴は Git snapshot から復元し、独自 database や Working Tree / Index の変更は行いません。壊れた snapshot は理由を表示します。Cell 単体の履歴検索は Later の対象です。
+
+### 大量の変更・競合の操作
+
+- History は50コミット、差分は100件単位で取得・表示します。表示済みページを積み増さず、Rust の差分キャッシュも1コミット分に限定します。
+- Conflict Resolver は初期状態で未解決だけを表示します。Master ごとの残件数、種類・列・状態・キーや値の検索で対象を絞り、100件ずつ比較できます。
+- 「このページの未解決を選択」「絞り込み内の未解決を全選択」、または個別チェックで対象を選び、Keep Mine / Use Incoming を一括適用できます。全選択は解決済みの判断を含みません。解決済みの判断を変更する場合は状態を切り替えて個別に選択します。
+- 適用前に件数・対象・削除になる件数・既存の解決を変更する件数を確認します。一括解決は1回の要求で検証し、マージ全体の再計算も1回です。revision や対象IDが古い場合は部分適用せず拒否します。構造競合の解決で新しい競合が現れた場合は、残件数と一覧に反映されます。
+- Change Review は変更のある行を初期表示し、グリッドの仮想化を維持します。右側の詳細も100件単位です。
+- 初回の差分計算・マージ計算には入力全体が必要です。競合データは引き続き Project snapshot に保持します。途中の解決内容はセッション内に保持し、Project を閉じた場合は再度解決が必要です。
+
+`pnpm test:review` は5万件の競合の検索・選択を、`cargo test -p gamemasterstudio-core` は2万コミットの全ページ走査、5万セル差分の取得・絞り込み、2万セル競合の一括解決と実際のMerge commitまでを検証します。
 
 ### Protected Branch / UX
 

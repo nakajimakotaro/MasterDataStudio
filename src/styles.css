@@ -1421,3 +1421,48 @@ dialog.review-modal[open] { display: flex; flex-direction: column; }
   .review-inspector { width: 100%; min-height: 180px; flex: none; border-left: 0; border-top: 1px solid #e3e9e5; }
   .review-details-body { overflow: visible; }
 }
+
+/* Bounded result pages keep large reviews and merges navigable. */
+dialog:has(.history-panel) { width: min(1500px, 96vw); max-width: 96vw; }
+.history-layout { grid-template-columns: 265px minmax(0, 1fr); gap: 20px; }
+.history-commits { min-width: 0; }
+.history-commits .conflict-list { max-height: 55vh; }
+.history-detail { max-height: 70vh; }
+.history-detail h3, .history-commits strong { overflow-wrap: anywhere; }
+.result-filters { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 14px 0; }
+.result-filters label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; min-width: 120px; flex: 1; }
+.result-filters input, .result-filters select { width: 100%; min-width: 0; }
+.result-filters button { flex-shrink: 0; }
+.result-pager { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; font-size: 12px; }
+.result-pager > span { margin-right: auto; font-variant-numeric: tabular-nums; }
+.result-summary { font-weight: 600; font-size: 13px; }
+.result-table-wrap { overflow: auto; max-height: 52vh; border: 1px solid #dfe4dd; border-radius: 8px; min-width: 0; }
+.result-table { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.result-table th { position: sticky; top: 0; z-index: 1; background: #f3f5f1; text-align: left; padding: 10px; border-bottom: 1px solid #dfe4dd; }
+.result-table td { padding: 10px; vertical-align: top; border-bottom: 1px solid #e8ece5; overflow-wrap: anywhere; white-space: pre-wrap; }
+.result-table tr.active td { background: #edf3ee; }
+.result-table td small { display: block; margin-top: 4px; color: #687268; }
+.result-table .result-link { background: none; border: 0; padding: 0; text-align: left; display: block; color: #315e50; white-space: normal; overflow-wrap: anywhere; max-width: 100%; }
+.result-link:hover { text-decoration: underline; }
+.selected-change { padding: 14px; margin-top: 14px; border: 1px solid #c6d7cb; border-radius: 8px; }
+.selected-change pre { max-height: 220px; overflow: auto; }
+.merge-progress { display: flex; align-items: center; gap: 12px; font-size: 13px; margin: 20px 0; }
+.merge-progress progress { width: min(400px, 50%); accent-color: #437565; }
+.batch-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; background: #f3f5f1; border-radius: 8px; font-size: 12px; }
+.batch-toolbar strong { margin-right: auto; }
+.batch-confirm { margin-top: 12px; }
+.batch-confirm p { overflow-wrap: anywhere; }
+.conflict-workspace { display: grid; grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr); gap: 20px; margin-bottom: 24px; align-items: start; }
+.conflict-workspace .result-table-wrap { max-height: 65vh; }
+.conflict-workspace .conflict-detail { border: 1px solid #dfe4dd; padding: 16px; border-radius: 8px; max-height: 65vh; overflow: auto; }
+.conflict-workspace .merge-sides { grid-template-columns: 1fr; }
+.conflict-workspace .merge-sides pre { max-height: 180px; }
+.conflict-table th:first-child { width: 48px; }
+.resolved-label { color: #286343; }
+.unresolved-label { color: #975911; font-weight: 600; }
+@media (max-width: 1000px) {
+  .conflict-workspace, .history-layout { grid-template-columns: 1fr; }
+  .history-commits .conflict-list { max-height: 200px; }
+  .conflict-workspace .result-table-wrap { max-height: 40vh; }
+  .result-table { min-width: 550px; }
+}

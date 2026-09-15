@@ -215,17 +215,34 @@ impl MergeSession {
                 ..MergeView::default()
             })
     }
-    fn resolve(
+    fn resolve_many(
         &mut self,
-        id: String,
+        ids: Vec<String>,
         mut resolution: Resolution,
         identity: &Identity,
     ) -> Result<()> {
-        let conflict = self
+        if ids.is_empty() {
+            return Err("解決対象を選択してください。".into());
+        }
+        if ids.len() > 1 && !matches!(resolution, Resolution::Ours | Resolution::Theirs) {
+            return Err("一括解決では Your Branch / Incoming を選択してください。".into());
+        }
+        let conflicts: BTreeMap<_, _> = self
             .plan
             .as_ref()
-            .and_then(|p| p.view.conflicts.iter().find(|c| c.id == id))
-            .ok_or("Conflict がありません。最新の状態でやり直してください。")?;
+            .ok_or("Merge input がありません。")?
+            .view
+            .conflicts
+            .iter()
+            .map(|c| (c.id.as_str(), c))
+            .collect();
+        // Validate the entire set before changing any choices; stale IDs never partially apply.
+        for id in &ids {
+            if !conflicts.contains_key(id.as_str()) {
+                return Err("Conflict がありません。最新の状態でやり直してください。".into());
+            }
+        }
+        let conflict = conflicts[ids[0].as_str()];
         if let Resolution::Custom(body) = &resolution {
             if conflict.kind == "comment" {
                 let body = crate::lf(body);
@@ -257,7 +274,9 @@ impl MergeSession {
             }
         }
         let mut choices = self.choices.clone();
-        choices.insert(id, resolution);
+        for id in ids {
+            choices.insert(id, resolution.clone());
+        }
         let sources = self.sources.as_ref().ok_or("Merge input がありません。")?;
         let plan = merge_project(&sources[0], &sources[1], &sources[2], &choices)?;
         self.choices = choices;
@@ -326,11 +345,19 @@ impl Project {
         resolution: Resolution,
         revision: u64,
     ) -> Result<Snapshot> {
+        self.resolve_conflicts(vec![id], resolution, revision)
+    }
+    pub fn resolve_conflicts(
+        &mut self,
+        ids: Vec<String>,
+        resolution: Resolution,
+        revision: u64,
+    ) -> Result<Snapshot> {
         self.merge_writable(revision)?;
         self.merge
             .as_mut()
             .ok_or("Merge 中ではありません。")?
-            .resolve(id, resolution, &self.identity)?;
+            .resolve_many(ids, resolution, &self.identity)?;
         self.revision += 1;
         Ok(self.snapshot())
     }

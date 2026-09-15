@@ -114,5 +114,7 @@ export type MergeView = {
 export type ChangeReviewData = { before: Snapshot["data"] | null; after: Snapshot["data"]; changes: SemanticChange[] };
 
 export type HistoryCommit = { oid: string; parents: string[]; author: Identity; authoredAt: string; subject: string };
-export type HistoryPage = { head: string | null; commits: HistoryCommit[]; hasMore: boolean };
-export type HistoryDetail = { oid: string; parent: string | null; message: string; changes: SemanticChange[] };
+export type HistoryPage = { head: string | null; commits: HistoryCommit[]; hasMore: boolean; nextCursor: string | null };
+
+export type ChangeFilter = { master: string; kind: string; column: string; query: string; offset: number };
+export type HistoryChangesPage = { oid: string; message: string; total: number; matched: number; masters: Record<string, number>; kinds: Record<string, number>; columns: Record<string, number>; changes: SemanticChange[]; offset: number; pageSize: number };

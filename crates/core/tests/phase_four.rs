@@ -544,3 +544,120 @@ fn history_before_project_initialization_has_no_invented_changes() {
     let p = Project::initialize(r).unwrap();
     assert!(p.history_detail(&initial).unwrap().changes.is_empty());
 }
+
+#[test]
+fn large_history_uses_searchable_stable_cursors() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let b = data();
+    let dir = repo(&b, &b, &b);
+    let head = git(dir.path(), &["rev-parse", "HEAD"]).unwrap();
+    let mut stream = tempfile::tempfile().unwrap();
+    // fast-import produces real Git commits without 20,000 shell invocations.
+    for i in 0..20_000 {
+        let message = format!("bulk [{i}] 日本語");
+        write!(stream, "commit refs/heads/history-scale\ncommitter Scale Tester <scale@example.com> {} +0000\ndata {}\n{}\n", 1_700_000_000 + i, message.len(), message).unwrap();
+        if i == 0 {
+            writeln!(stream, "from {head}").unwrap();
+        }
+        writeln!(stream).unwrap();
+    }
+    use std::io::{Seek, SeekFrom};
+    stream.seek(SeekFrom::Start(0)).unwrap();
+    let output = Command::new("git")
+        .args(["fast-import", "--quiet"])
+        .current_dir(dir.path())
+        .stdin(Stdio::from(stream))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    git(dir.path(), &["switch", "history-scale"]).unwrap();
+    let project = Project::open(dir.path()).unwrap();
+    let mut page = project
+        .history_search(None, "bulk [", "Scale Tester")
+        .unwrap();
+    assert_eq!(page.commits[0].subject, "bulk [19999] 日本語");
+    // A new HEAD must not slip into the anchored traversal.
+    save(dir.path(), "bulk [new]");
+    let mut seen = std::collections::BTreeSet::new();
+    loop {
+        assert!(page.commits.len() <= 50);
+        for commit in &page.commits {
+            assert!(seen.insert(commit.oid.clone()));
+        }
+        let Some(cursor) = page.next_cursor else {
+            break;
+        };
+        page = project
+            .history_search(Some(&cursor), "bulk [", "Scale Tester")
+            .unwrap();
+    }
+    assert_eq!(seen.len(), 20_000);
+    let found = project
+        .history_search(None, "[0] 日本語", "scale@example.com")
+        .unwrap();
+    assert_eq!(found.commits.len(), 1);
+    assert_eq!(found.commits[0].subject, "bulk [0] 日本語");
+    assert!(!found.has_more);
+    assert!(project
+        .history_search(None, "[0]", "nobody")
+        .unwrap()
+        .commits
+        .is_empty());
+    assert!(project.history_search(Some("--all"), "", "").is_err());
+}
+
+#[test]
+fn fifty_thousand_cell_changes_are_paged_and_filtered_without_loss() {
+    use gamemasterstudio_core::history::{ChangeFilter, HistoryDetail};
+    let detail = HistoryDetail {
+        oid: "a".repeat(40),
+        parent: None,
+        message: "scale".into(),
+        changes: (0..50_000)
+            .map(|i| SemanticChange::Cell {
+                master_id: if i % 2 == 0 { "enemy" } else { "item" }.into(),
+                primary_key: vec![i.to_string(), "日本語".into()],
+                column: if i % 4 == 0 { "hp" } else { "name" }.into(),
+                before: "old".into(),
+                after: if i == 49_999 { "unique value" } else { "" }.into(),
+            })
+            .collect(),
+    };
+    let page = detail.page(&ChangeFilter::default());
+    assert_eq!(page.total, 50_000);
+    assert_eq!(page.matched, 50_000);
+    assert_eq!(page.changes.len(), 100);
+    assert_eq!(page.masters["enemy"], 25_000);
+    let mut filter = ChangeFilter {
+        master: "enemy".into(),
+        kind: "cell".into(),
+        column: "hp".into(),
+        ..Default::default()
+    };
+    let page = detail.page(&filter);
+    assert_eq!(page.matched, 12_500);
+    assert_eq!(page.columns["hp"], 12_500);
+    filter.offset = 12_400;
+    let page = detail.page(&filter);
+    assert_eq!(page.changes.len(), 100);
+    assert!(
+        matches!(&page.changes[99], SemanticChange::Cell { primary_key, after, .. } if primary_key[0] == "49996" && after.is_empty())
+    );
+    filter.offset = usize::MAX;
+    assert!(detail.page(&filter).changes.is_empty());
+    let page = detail.page(&ChangeFilter {
+        query: "UNIQUE VALUE".into(),
+        ..Default::default()
+    });
+    assert_eq!(page.matched, 1);
+    assert!(
+        matches!(&page.changes[0], SemanticChange::Cell { primary_key, .. } if primary_key[0] == "49999")
+    );
+}

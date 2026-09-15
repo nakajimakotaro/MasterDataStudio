@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "cargo test -p gamemasterstudio-core",
-    "test:review": "node --test tests/changeReview.test.ts",
+    "test:review": "node --test tests/*.test.ts",
     "check": "tsc -b && cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings"
   },
   "dependencies": {

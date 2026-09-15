@@ -1,13 +1,12 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   useIsMutating,
-  useInfiniteQuery,
   useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
 import { useUI } from "./store";
-import type { ChangeReviewData, HistoryDetail, HistoryPage, Operation, Resolution, SemanticChange, Snapshot } from "./types";
+import type { ChangeFilter, ChangeReviewData, HistoryChangesPage, HistoryPage, Operation, Resolution, SemanticChange, Snapshot } from "./types";
 
 export const desktop = isTauri();
 type Request =
@@ -21,6 +20,7 @@ type Request =
   | { command: "revert_change"; change: SemanticChange }
   | { command: "merge_branch"; branch: string }
   | { command: "resolve_conflict"; id: string; resolution: Resolution }
+  | { command: "resolve_conflicts"; ids: string[]; resolution: Resolution; revision: number }
   | { command: "complete_merge"; message: string }
   | { command: "abort_merge" };
 
@@ -43,7 +43,7 @@ export function useRepositoryAction() {
       const current = client.getQueryData<Snapshot | null>(["project"]);
       return invoke<Snapshot | null>(command, {
         ...args,
-        revision: current?.revision ?? 0,
+        revision: "revision" in request ? request.revision : current?.revision ?? 0,
       });
     },
     onSuccess: (snapshot, request) => {
@@ -84,19 +84,19 @@ export function useRecent() {
   });
 }
 
-export function useHistory(project: Snapshot) {
-  return useInfiniteQuery({
-    queryKey: ["history", project.root, project.git.branch],
-    initialPageParam: { offset: 0, head: null as string | null },
-    queryFn: ({ pageParam }) => invoke<HistoryPage>("project_history", { root: project.root, ...pageParam }),
-    getNextPageParam: (last, pages) => last.hasMore ? { offset: pages.reduce((n, p) => n + p.commits.length, 0), head: last.head } : undefined,
+export function useHistory(project: Snapshot, cursor: string | null, query: string, author: string) {
+  return useQuery({
+    queryKey: ["history", project.root, project.git.branch, cursor, query, author],
+    queryFn: () => invoke<HistoryPage>("project_history", { root: project.root, cursor, query, author }),
+    gcTime: 0,
   });
 }
-export function useHistoryDetail(root: string, oid: string | null) {
+export function useHistoryDetail(root: string, oid: string | null, filter: ChangeFilter) {
   return useQuery({
-    queryKey: ["historyDetail", root, oid],
-    queryFn: () => invoke<HistoryDetail>("history_detail", { root, oid }),
+    queryKey: ["historyDetail", root, oid, filter],
+    queryFn: () => invoke<HistoryChangesPage>("history_detail", { root, oid, filter }),
     enabled: !!oid,
+    gcTime: 0,
     staleTime: Infinity,
   });
 }

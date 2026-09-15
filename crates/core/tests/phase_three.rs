@@ -657,3 +657,50 @@ fn removing_a_conflicting_column_eliminates_its_row_conflict() {
         .iter()
         .any(|c| c.kind == "row" && c.resolution.is_none()));
 }
+
+#[test]
+fn twenty_thousand_conflicts_resolve_atomically_in_batches() {
+    let csv = |value: &str| {
+        let mut csv = String::from("id,wave,hp\n");
+        for i in 0..20_000 {
+            csv.push_str(&format!("{i},1,{value}\n"));
+        }
+        csv
+    };
+    let dir = repository(&data(&csv("100")), &data(&csv("120")), &data(&csv("150")));
+    let mut project = Project::open(dir.path()).unwrap();
+    let s = project.merge_branch("incoming").unwrap();
+    let view = s.merge.unwrap();
+    assert_eq!(view.remaining, 20_000);
+    let ids: Vec<_> = view.conflicts.iter().map(|c| c.id.clone()).collect();
+    // A bad ID at the end must leave even the first valid choice untouched.
+    let mut invalid = ids.clone();
+    invalid.push("missing".into());
+    assert!(project
+        .resolve_conflicts(invalid, Resolution::Theirs, s.revision)
+        .is_err());
+    assert_eq!(project.snapshot().merge.unwrap().remaining, 20_000);
+    assert!(project
+        .resolve_conflicts(ids.clone(), Resolution::Ours, s.revision + 1)
+        .is_err());
+    assert!(project
+        .resolve_conflicts(vec![], Resolution::Ours, s.revision)
+        .is_err());
+    assert!(project
+        .resolve_conflicts(ids.clone(), Resolution::Custom("bad".into()), s.revision)
+        .is_err());
+    let s = project
+        .resolve_conflicts(ids[..10_000].to_vec(), Resolution::Theirs, s.revision)
+        .unwrap();
+    assert_eq!(s.merge.as_ref().unwrap().remaining, 10_000);
+    assert_eq!(s.revision, 2);
+    let s = project
+        .resolve_conflicts(ids[10_000..].to_vec(), Resolution::Ours, s.revision)
+        .unwrap();
+    assert_eq!(s.merge.as_ref().unwrap().remaining, 0);
+    let s = project.complete_merge("bulk resolved", s.revision).unwrap();
+    let rows = &s.data.masters["enemy"].data.as_ref().unwrap().table.rows;
+    assert_eq!(rows.len(), 20_000);
+    assert_eq!(rows.iter().filter(|r| r[2] == "150").count(), 10_000);
+    assert_eq!(rows.iter().filter(|r| r[2] == "120").count(), 10_000);
+}
