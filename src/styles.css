@@ -700,6 +700,7 @@ button.icon-button {
   padding: 23px 25px 20px;
 }
 .editor-title {
+  position: relative;
   display: flex;
   gap: 12px;
   align-items: center;
@@ -708,6 +709,13 @@ button.icon-button {
 .editor-title h1 {
   font-size: 25px;
   letter-spacing: -0.3px;
+}
+.editor-master-title h1 {
+  min-width: 0;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .editor-title .badge {
   font-size: 8px;
@@ -721,8 +729,13 @@ button.icon-button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.editor-master-title > code {
+  max-width: 25%;
+  white-space: nowrap;
+}
 .editor-title > button {
   margin-left: auto;
+  flex-shrink: 0;
 }
 .editor-toolbar {
   display: flex;
@@ -732,6 +745,10 @@ button.icon-button {
   border-bottom: 1px solid #e2e8e4;
   padding: 10px 19px;
   min-height: 56px;
+}
+.editor > .editor-toolbar {
+  overflow-x: auto;
+  flex-shrink: 0;
 }
 .toolbar-group {
   display: flex;
@@ -809,12 +826,6 @@ button.icon-button {
   padding: 0;
   color: #82958a;
   font-size: 10px;
-}
-.row-selection-hint {
-  padding: 7px 18px;
-  color: #63727c;
-  background: #f7f9fa;
-  font-size: 11px;
 }
 .ag-container {
   flex: 1;
@@ -1012,16 +1023,53 @@ button.icon-button {
   color: #a99a93;
 }
 .table-comment {
+  flex: 1;
+  min-width: 0;
+}
+.table-comment > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 0;
+  color: #738078;
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.table-comment > summary::-webkit-details-marker {
+  display: none;
+}
+.table-comment > summary > svg {
   flex-shrink: 0;
-  max-height: 220px;
+}
+.table-comment > summary > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-comment > summary:hover,
+.table-comment[open] > summary {
+  color: #437565;
+}
+.table-comment-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: min(420px, 100%);
+  max-height: min(360px, 60vh);
   overflow-y: auto;
-  background: #fcfdfc;
+  background: #fff;
+  border: 1px solid #e2e8e4;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px #27364020;
 }
 .table-comment .comment-box {
-  padding: 12px 18px;
+  padding: 16px;
+  border-bottom: 0;
 }
 .table-comment textarea {
-  min-height: 52px;
+  min-height: 90px;
   margin-top: 0;
   padding: 6px 10px;
 }

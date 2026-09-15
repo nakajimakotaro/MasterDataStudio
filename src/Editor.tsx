@@ -11,7 +11,6 @@ import {
   Columns3,
   Copy,
   Eraser,
-  KeyRound,
   MessageSquare,
   PanelRightClose,
   PanelRightOpen,
@@ -370,9 +369,15 @@ export function Editor({
           <span>/</span>
           {masterId}
         </div>
-        <div className="editor-title">
-          <h1>{masterId}</h1>
+        <div className="editor-title editor-master-title">
+          <h1 title={masterId}>{masterId}</h1>
           <span className="badge">MASTER</span>
+          <TableComment
+            key={masterId}
+            masterId={masterId}
+            comment={master.comments.table}
+            editable={editable}
+          />
           <code>{def.path}</code>
           <button
             className="icon-button"
@@ -451,6 +456,22 @@ export function Editor({
             <Redo2 size={17} />
           </button>
         </div>
+        <div className="toolbar-group">
+          <button
+            disabled={!editable || !rangeCount}
+            title="空文字にする"
+            aria-label="空文字にする"
+            onClick={() => edit(selectionEdits(""))}
+          >
+            <Eraser size={16} />
+          </button>
+          <button
+            disabled={!editable || !rangeCount}
+            onClick={() => setFillValue("")}
+          >
+            選択範囲を埋める
+          </button>
+        </div>
         <div className="toolbar-spacer" />
         <label className="search-box">
           <Search size={16} />
@@ -480,43 +501,6 @@ export function Editor({
       </div>}
       <div className="editor-content">
         <div className="grid-panel">
-          <div className="table-comment">
-            <CommentBox
-              key={`table:${masterId}:${master.comments.table?.body}`}
-              label="Table Comment"
-              comment={master.comments.table}
-              masterId={masterId}
-              target={{ kind: "table" }}
-              editable={editable}
-            />
-          </div>
-          <div className="grid-hint">
-            <span>
-              <KeyRound size={13} />
-              Primary Key も編集・オートフィルできます（空文字・重複は保存できません）
-            </span>
-            <div>
-              <button
-                disabled={!editable || !rangeCount}
-                onClick={() => edit(selectionEdits(""))}
-              >
-                <Eraser size={13} />
-                空文字にする
-              </button>
-              <button
-                disabled={!editable || !rangeCount}
-                onClick={() => setFillValue("")}
-              >
-                選択範囲を埋める
-              </button>
-            </div>
-          </div>
-          <div className="row-selection-hint">
-            行をクリック → Shift＋クリックで範囲選択 · ⌘/Ctrl＋クリックで個別選択 · 左上のチェックまたは⌘/Ctrl＋Aで表示中の全行を選択
-          </div>
-          <div className="row-selection-hint">
-            オートフィル: セル選択の右下の■を上下左右にドラッグ · 1セルならコピー、1・2など複数の数値なら連番 · Alt/Option＋ドラッグでコピーと連番を切り替え
-          </div>
           {fillValue !== null && (
             <form
               className="fill-bar"
@@ -752,6 +736,55 @@ function Inspector({
   );
 }
 
+function TableComment({ masterId, comment, editable }: {
+  masterId: string;
+  comment: Comment | null;
+  editable: boolean;
+}) {
+  const details = useRef<HTMLDetailsElement>(null);
+  const preview = comment?.body || (editable ? "コメントを追加" : "コメントなし");
+  useEffect(() => {
+    const close = (event: PointerEvent | KeyboardEvent) => {
+      const element = details.current;
+      if (!element?.open) return;
+      const escape = event instanceof KeyboardEvent && event.key === "Escape";
+      const outside = event instanceof PointerEvent && !element.contains(event.target as Node);
+      if (!escape && !outside) return;
+      // Commit a focused edit before hiding the panel.
+      element.querySelector("textarea")?.blur();
+      element.open = false;
+      if (escape) {
+        event.preventDefault();
+        element.querySelector("summary")?.focus();
+      }
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, []);
+  return (
+    <details className="table-comment" ref={details}>
+      <summary aria-label="テーブルコメント" title={preview}>
+        <MessageSquare size={14} />
+        <span>{preview}</span>
+      </summary>
+      <div className="table-comment-panel">
+        <CommentBox
+          key={`${masterId}:${comment?.body}`}
+          label="Table Comment"
+          comment={comment}
+          masterId={masterId}
+          target={{ kind: "table" }}
+          editable={editable}
+        />
+      </div>
+    </details>
+  );
+}
+
 function CommentBox({
   label,
   comment,
@@ -795,9 +828,7 @@ function CommentBox({
               e.currentTarget.blur();
             }
           }}
-          placeholder={target.kind === "table"
-            ? "テーブルの説明を追加…（入力欄を離れると自動保存）"
-            : "コメントを追加…"}
+          placeholder="コメントを追加…"
           rows={target.kind === "table" ? 2 : 3}
         />
       </label>
