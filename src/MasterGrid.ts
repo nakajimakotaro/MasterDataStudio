@@ -23,7 +23,7 @@ export function masterColumn<T>(column: string, primaryKey: string[]): ColDef<T>
   return {
     colId: `data:${column}`,
     headerName: column,
-    headerTooltip: pk ? `${column} · Primary Key（編集不可）` : column,
+    headerTooltip: pk ? `${column} · Primary Key` : column,
     pinned: pk ? "left" : undefined,
     lockPinned: true,
     lockPosition: pk ? "left" : undefined,

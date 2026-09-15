@@ -23,6 +23,7 @@ import {
   Undo2,
 } from "lucide-react";
 import { masterColumn, masterGridTheme } from "./MasterGrid";
+import { CellEditBatch } from "./cellEditBatch";
 import { useBusy, useRepositoryAction } from "./api";
 import { useUI, type DraftRow } from "./store";
 import {
@@ -45,9 +46,8 @@ const columnName = (id: string) => (id.startsWith("data:") ? id.slice(5) : "");
 // Selection updates must not rebuild columns or re-sort the grid: doing so can
 // remove the cell anchoring an open context menu and immediately close it.
 const editorGridOptions: Pick<GridOptions<GridRow>,
-  "cellSelection" | "rowSelection" | "selectionColumnDef" | "postSortRows" | "getRowId"
+  "rowSelection" | "selectionColumnDef" | "postSortRows" | "getRowId"
 > = {
-  cellSelection: { suppressMultiRanges: false },
   rowSelection: {
     mode: "multiRow",
     enableClickSelection: true,
@@ -91,9 +91,25 @@ export function Editor({
   const [fillValue, setFillValue] = useState<string | null>(null);
   const [rangeCount, setRangeCount] = useState(0);
   const newRowKeys = useRef<string[]>([]);
+  const fillEdits = useRef(new CellEditBatch());
   const grid = useRef<AgGridReact<GridRow>>(null);
   const def = project.data.config.masters[masterId];
   const editable = !!project.identity.name && !!project.identity.email && !project.git.protected && !project.git.mergeInProgress && !busy;
+  const cellSelection = useMemo<GridOptions<GridRow>["cellSelection"]>(() => ({
+    suppressMultiRanges: false,
+    handle: editable ? {
+      mode: "fill",
+      direction: "xy",
+      suppressClearOnFillReduction: true,
+      setFillValue: (params) => {
+        // Copy a single seed verbatim, including leading zeroes. Let AG Grid
+        // extend numeric sequences and handle Alt-drag itself.
+        if (params.initialValues.length === 1 && !params.event.altKey)
+          return params.initialValues[0];
+        return false;
+      },
+    } : undefined,
+  }), [editable]);
   const draftScope = JSON.stringify([project.root, project.git.branch, masterId]);
   const drafts = ui.drafts[draftScope] ?? emptyDrafts;
   const setDrafts = useCallback((rows: DraftRow[]) => {
@@ -135,13 +151,6 @@ export function Editor({
   const edit = useCallback((edits: CellEdit[]) => {
     if (!editable || !edits.length) return;
     const isDraft = (e: CellEdit) => drafts.some(row => keyId(row.key) === keyId(e.primaryKey));
-    if (edits.some((e) => !isDraft(e) && def.primaryKey.includes(e.column))) {
-      ui.set({
-        error:
-          "Primary Key を含む操作は、全体を適用できません。選択範囲を変更してください。",
-      });
-      return;
-    }
     const updateDrafts = () => setDrafts(drafts.map(row => {
       const cells = { ...row.cells };
       for (const e of edits) if (keyId(e.primaryKey) === keyId(row.key)) cells[e.column] = e.value;
@@ -153,8 +162,11 @@ export function Editor({
       operation: { type: "editCells", masterId, edits: savedEdits },
     }, { onSuccess: updateDrafts });
     else updateDrafts();
-  }, [editable, drafts, def.primaryKey, ui.set, setDrafts, action.mutate, masterId]);
-  const selectionEdits = useCallback((value: string, copyTopRow = false): CellEdit[] => {
+  }, [editable, drafts, setDrafts, action.mutate, masterId]);
+  const selectionEdits = useCallback((
+    value: string,
+    copyTopRow = false,
+  ): CellEdit[] => {
     if (!api) return [];
     const edits = new Map<string, CellEdit>();
     for (const range of api.getCellRanges() ?? []) {
@@ -211,13 +223,12 @@ export function Editor({
       ...master.table.columns.filter((c) => !def.primaryKey.includes(c)),
     ];
     return order.map((column) => {
-      const pk = def.primaryKey.includes(column);
       const index = master.table.columns.indexOf(column);
       return {
         ...masterColumn<GridRow>(column, def.primaryKey),
         valueGetter: (p) => p.data?.values[index] ?? "",
         valueParser: (p) => String(p.newValue ?? ""),
-        editable: (p) => editable && (!pk || !!p.data?.draft),
+        editable,
         tooltipValueGetter: (p) => {
           const comment = master.comments.cells.find(
             (c) =>
@@ -482,7 +493,7 @@ export function Editor({
           <div className="grid-hint">
             <span>
               <KeyRound size={13} />
-              新規行の Primary Key は表で入力できます（保存後は固定）
+              Primary Key も編集・オートフィルできます（空文字・重複は保存できません）
             </span>
             <div>
               <button
@@ -502,6 +513,9 @@ export function Editor({
           </div>
           <div className="row-selection-hint">
             行をクリック → Shift＋クリックで範囲選択 · ⌘/Ctrl＋クリックで個別選択 · 左上のチェックまたは⌘/Ctrl＋Aで表示中の全行を選択
+          </div>
+          <div className="row-selection-hint">
+            オートフィル: セル選択の右下の■を上下左右にドラッグ · 1セルならコピー、1・2など複数の数値なら連番 · Alt/Option＋ドラッグでコピーと連番を切り替え
           </div>
           {fillValue !== null && (
             <form
@@ -553,6 +567,7 @@ export function Editor({
           >
             <AgGridReact<GridRow>
               {...editorGridOptions}
+              cellSelection={cellSelection}
               ref={grid}
               theme={masterGridTheme}
               rowData={rowData}
@@ -602,15 +617,16 @@ export function Editor({
                 if (row && master.table.columns.includes(column))
                   ui.set({ cell: { primaryKey: row.key, column } });
               }}
-              onCellEditRequest={(e) =>
-                edit([
-                  {
-                    primaryKey: e.data.key,
-                    column: columnName(e.column.getColId()),
-                    value: String(e.newValue ?? ""),
-                  },
-                ])
-              }
+              onFillStart={() => fillEdits.current.start()}
+              onFillEnd={() => edit(fillEdits.current.finish())}
+              onCellEditRequest={(e) => {
+                if (String(e.newValue ?? "") === String(e.oldValue ?? "")) return;
+                edit(fillEdits.current.request({
+                  primaryKey: e.data.key,
+                  column: columnName(e.column.getColId()),
+                  value: String(e.newValue ?? ""),
+                }));
+              }}
               overlayNoRowsTemplate="<span>Row がありません。「Row 追加」から作成できます。</span>"
             />
           </div>

@@ -2,7 +2,7 @@ use gamemasterstudio_core::{
     comments::{CommentTarget, Comments, Identity},
     config::{MasterDefinition, ProjectConfig, CONFIG_PATH},
     csv_data::Table,
-    project::{git, Operation, Project},
+    project::{git, CellEdit, Operation, Project},
     storage,
 };
 use std::{fs, path::Path};
@@ -218,16 +218,38 @@ fn edits_autosave_and_undo_redo_persist_across_all_operation_types() {
 }
 
 #[test]
-fn pk_targets_reject_whole_batch_without_history_or_disk_changes() {
+fn invalid_pk_edits_reject_whole_batch_without_history_or_disk_changes() {
     let (dir, mut project) = fixture();
     add(&mut project, "a", "1");
+    add(&mut project, "a", "2");
+    comment(
+        &mut project,
+        CommentTarget::Row {
+            primary_key: vec!["a".into(), "1".into()],
+        },
+        "keep metadata",
+    );
     let before = project.snapshot();
     let disk = bytes(dir.path(), "masters/waves.csv");
-    let operation = serde_json::from_value(serde_json::json!({"type":"editCells","masterId":"waves","edits":[{"primaryKey":["a","1"],"column":"name","value":"bad"},{"primaryKey":["a","1"],"column":"wave","value":"2"}]})).unwrap();
-    assert!(project.apply(operation, before.revision).is_err());
-    assert_eq!(project.snapshot().data, before.data);
-    assert_eq!(project.snapshot().revision, before.revision);
-    assert_eq!(bytes(dir.path(), "masters/waves.csv"), disk);
+    let metadata = bytes(dir.path(), "gamemasterstudio/comments/waves.json");
+    for value in ["2", ""] {
+        let operation = serde_json::from_value(serde_json::json!({"type":"editCells","masterId":"waves","edits":[{"primaryKey":["a","1"],"column":"name","value":"bad"},{"primaryKey":["a","1"],"column":"wave","value":value}]})).unwrap();
+        let error = project.apply(operation, before.revision).err().unwrap();
+        assert!(error.contains(if value.is_empty() {
+            "空文字"
+        } else {
+            "重複"
+        }));
+        assert_eq!(project.snapshot().data, before.data);
+        assert_eq!(project.snapshot().revision, before.revision);
+        assert_eq!(project.snapshot().can_undo, before.can_undo);
+        assert_eq!(project.snapshot().can_redo, before.can_redo);
+        assert_eq!(bytes(dir.path(), "masters/waves.csv"), disk);
+        assert_eq!(
+            bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
+            metadata
+        );
+    }
     assert!(project
         .apply(
             Operation::DeleteColumn {
@@ -256,6 +278,168 @@ fn pk_targets_reject_whole_batch_without_history_or_disk_changes() {
             before.revision - 1
         )
         .is_err());
+}
+
+#[test]
+fn primary_key_fill_renumbers_rows_and_comments_in_one_undoable_operation() {
+    let (dir, mut project) = fixture();
+    for wave in ["1", "2", "3"] {
+        add(&mut project, "a", wave);
+        let key = vec!["a".into(), wave.into()];
+        comment(
+            &mut project,
+            CommentTarget::Row {
+                primary_key: key.clone(),
+            },
+            wave,
+        );
+        comment(
+            &mut project,
+            CommentTarget::Cell {
+                primary_key: key,
+                column: "wave".into(),
+            },
+            wave,
+        );
+    }
+    let before = project.snapshot();
+    let csv_before = bytes(dir.path(), "masters/waves.csv");
+    let comments_before = bytes(dir.path(), "gamemasterstudio/comments/waves.json");
+    let mut edits = vec![];
+    for wave in 1..=3 {
+        let primary_key = vec!["a".into(), wave.to_string()];
+        edits.push(CellEdit {
+            primary_key: primary_key.clone(),
+            column: "wave".into(),
+            value: (wave + 1).to_string(),
+        });
+        // Still addresses the original row even after its key was edited.
+        edits.push(CellEdit {
+            primary_key,
+            column: "name".into(),
+            value: format!("row {wave}"),
+        });
+    }
+    apply(
+        &mut project,
+        Operation::EditCells {
+            master_id: "waves".into(),
+            edits,
+        },
+    );
+    let after = project.snapshot();
+    assert_eq!(after.revision, before.revision + 1);
+    let original = before.data.masters["waves"].data.as_ref().unwrap();
+    let master = after.data.masters["waves"].data.as_ref().unwrap();
+    for (i, row) in master.table.rows.iter().enumerate() {
+        let key = vec!["a".to_string(), (i + 2).to_string()];
+        assert_eq!(&row[..2], key);
+        assert_eq!(row[2], format!("row {}", i + 1));
+        assert_eq!(master.comments.rows[i].primary_key, key);
+        assert_eq!(
+            master.comments.rows[i].comment,
+            original.comments.rows[i].comment
+        );
+        assert_eq!(master.comments.cells[i].primary_key, key);
+        assert_eq!(
+            master.comments.cells[i].comment,
+            original.comments.cells[i].comment
+        );
+    }
+    let csv_after = bytes(dir.path(), "masters/waves.csv");
+    let comments_after = bytes(dir.path(), "gamemasterstudio/comments/waves.json");
+    project.undo(after.revision).unwrap();
+    assert_eq!(project.snapshot().data, before.data);
+    assert_eq!(bytes(dir.path(), "masters/waves.csv"), csv_before);
+    assert_eq!(
+        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
+        comments_before
+    );
+    project.redo(project.snapshot().revision).unwrap();
+    assert_eq!(project.snapshot().data, after.data);
+    assert_eq!(bytes(dir.path(), "masters/waves.csv"), csv_after);
+    assert_eq!(
+        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
+        comments_after
+    );
+    assert_eq!(
+        Project::open(dir.path()).unwrap().snapshot().data,
+        after.data
+    );
+}
+
+#[test]
+fn composite_key_swaps_move_comments_once_and_preserve_raw_strings() {
+    let (dir, mut project) = fixture();
+    add(&mut project, "a,b", "001");
+    add(&mut project, "a", "b,001");
+    let first = vec!["a,b".into(), "001".into()];
+    let second = vec!["a".into(), "b,001".into()];
+    comment(
+        &mut project,
+        CommentTarget::Row {
+            primary_key: first.clone(),
+        },
+        "first",
+    );
+    comment(
+        &mut project,
+        CommentTarget::Row {
+            primary_key: second.clone(),
+        },
+        "second",
+    );
+    let mut edits = vec![];
+    for (from, to) in [(&first, &second), (&second, &first)] {
+        for (column, value) in ["stage", "wave"].into_iter().zip(to) {
+            edits.push(CellEdit {
+                primary_key: from.clone(),
+                column: column.into(),
+                value: value.clone(),
+            });
+        }
+    }
+    apply(
+        &mut project,
+        Operation::EditCells {
+            master_id: "waves".into(),
+            edits,
+        },
+    );
+    let snapshot = project.snapshot();
+    let master = snapshot.data.masters["waves"].data.as_ref().unwrap();
+    for (key, body) in [(&second, "first"), (&first, "second")] {
+        assert_eq!(
+            master
+                .comments
+                .rows
+                .iter()
+                .find(|c| &c.primary_key == key)
+                .unwrap()
+                .comment
+                .body,
+            body
+        );
+    }
+    // Comment identities follow the canonical LF form of an edited key.
+    apply(
+        &mut project,
+        Operation::EditCells {
+            master_id: "waves".into(),
+            edits: vec![CellEdit {
+                primary_key: first,
+                column: "stage".into(),
+                value: "new\r\nstage".into(),
+            }],
+        },
+    );
+    let reopened = Project::open(dir.path()).unwrap().snapshot();
+    let master = reopened.data.masters["waves"].data.as_ref().unwrap();
+    assert!(master
+        .comments
+        .rows
+        .iter()
+        .any(|c| c.primary_key == vec!["new\nstage", "001"] && c.comment.body == "second"));
 }
 
 #[test]

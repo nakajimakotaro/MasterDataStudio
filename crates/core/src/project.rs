@@ -473,18 +473,44 @@ impl Project {
             }
             Operation::EditCells { master_id, edits } => {
                 let (master, def) = get_master(&mut next, &master_id)?;
-                // Validate all targets before applying any cell in the logical operation.
+                // Resolve every target against the original keys. A fill can
+                // renumber rows into keys vacated by the same operation.
+                let indices = master.table.key_indices(def)?;
+                let original_rows: BTreeMap<_, _> = master
+                    .table
+                    .rows
+                    .iter()
+                    .enumerate()
+                    .map(|(i, row)| (Table::key(row, &indices), i))
+                    .collect();
                 let mut targets = vec![];
+                let mut changes_keys = false;
                 for edit in edits {
-                    if def.primary_key.contains(&edit.column) {
-                        return Err("Primary Key を含む編集は操作全体を適用できません。".into());
-                    }
-                    let row = master.table.row_index(&edit.primary_key, def)?;
+                    changes_keys |= def.primary_key.contains(&edit.column);
+                    let row = *original_rows
+                        .get(&edit.primary_key)
+                        .ok_or_else(|| format!("Row がありません: {:?}", edit.primary_key))?;
                     let col = column_index(&master.table, &edit.column)?;
                     targets.push((row, col, edit.value));
                 }
                 for (row, col, value) in targets {
-                    master.table.rows[row][col] = value;
+                    master.table.rows[row][col] = crate::lf(&value);
+                }
+                if changes_keys {
+                    // Move metadata once using original identities, including
+                    // swaps. Final key validation below rejects empty/duplicate
+                    // keys before any data, files, or history are committed.
+                    for key in master
+                        .comments
+                        .rows
+                        .iter_mut()
+                        .map(|c| &mut c.primary_key)
+                        .chain(master.comments.cells.iter_mut().map(|c| &mut c.primary_key))
+                    {
+                        if let Some(&row) = original_rows.get(key) {
+                            *key = Table::key(&master.table.rows[row], &indices);
+                        }
+                    }
                 }
             }
             Operation::CreateRows { master_id, rows } => {
