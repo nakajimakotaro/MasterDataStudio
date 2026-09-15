@@ -92,7 +92,7 @@ fn config_validates_identity_paths_version_and_primary_key() {
         "masters/../data.csv",
         "C:\\data.csv",
         ".git/data.csv",
-        ".gamemasterstudio/data.csv",
+        "gamemasterstudio/data.csv",
         "masters//data.csv",
         "masters/./data.csv",
     ] {
@@ -279,7 +279,7 @@ fn row_and_column_delete_remove_comments_and_undo_restores_exact_metadata() {
         },
         "cell",
     );
-    let original = bytes(dir.path(), ".gamemasterstudio/comments/waves.json");
+    let original = bytes(dir.path(), "gamemasterstudio/comments/waves.json");
     let comments: Comments = serde_json::from_slice(&original).unwrap();
     assert!(original.ends_with(b"\n"));
     assert!(String::from_utf8_lossy(&original).contains("\n  \"version\""));
@@ -300,7 +300,7 @@ fn row_and_column_delete_remove_comments_and_undo_restores_exact_metadata() {
         .is_empty());
     project.undo(project.snapshot().revision).unwrap();
     assert_eq!(
-        bytes(dir.path(), ".gamemasterstudio/comments/waves.json"),
+        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
         original
     );
     apply(
@@ -321,7 +321,7 @@ fn row_and_column_delete_remove_comments_and_undo_restores_exact_metadata() {
     );
     project.undo(project.snapshot().revision).unwrap();
     assert_eq!(
-        bytes(dir.path(), ".gamemasterstudio/comments/waves.json"),
+        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
         original
     );
     comment(&mut project, CommentTarget::Table, "  \r\n ");
@@ -334,12 +334,12 @@ fn row_and_column_delete_remove_comments_and_undo_restores_exact_metadata() {
     );
     assert!(!dir
         .path()
-        .join(".gamemasterstudio/comments/waves.json")
+        .join("gamemasterstudio/comments/waves.json")
         .exists());
     project.undo(project.snapshot().revision).unwrap();
     assert!(dir
         .path()
-        .join(".gamemasterstudio/comments/waves.json")
+        .join("gamemasterstudio/comments/waves.json")
         .exists());
 }
 
@@ -502,7 +502,7 @@ fn failed_save_keeps_snapshot_and_undo_history_unchanged() {
     add(&mut project, "a", "1");
     let before = project.snapshot();
     // A non-directory ancestor fails preparation, before any CSV can be replaced.
-    fs::write(dir.path().join(".gamemasterstudio/comments"), b"blocker").unwrap();
+    fs::write(dir.path().join("gamemasterstudio/comments"), b"blocker").unwrap();
     let original = bytes(dir.path(), "masters/waves.csv");
     assert!(project
         .apply(
@@ -529,7 +529,7 @@ fn symlink_paths_are_rejected_including_metadata_directory() {
     assert!(storage::safe_path(dir.path(), "linked/data.csv").is_err());
     assert!(storage::safe_path(dir.path(), "../outside.csv").is_err());
     git(dir.path(), &["init", "-b", "main"]).unwrap();
-    std::os::unix::fs::symlink(outside.path(), dir.path().join(".gamemasterstudio")).unwrap();
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("gamemasterstudio")).unwrap();
     assert!(Project::initialize(dir.path()).is_err());
     assert!(fs::read_dir(outside.path()).unwrap().next().is_none());
 }

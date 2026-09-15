@@ -247,7 +247,7 @@ impl Project {
                     def,
                 )?;
                 let comment_path =
-                    storage::safe_path(&root, &format!(".gamemasterstudio/comments/{id}.json"))?;
+                    storage::safe_path(&root, &format!("gamemasterstudio/comments/{id}.json"))?;
                 let mut comments = match storage::read_optional(&comment_path)? {
                     Some(bytes) => serde_json::from_slice::<Comments>(&bytes)
                         .map_err(|e| format!("Comment JSON: {e}"))?,
@@ -413,7 +413,7 @@ impl Project {
                 if storage::safe_path(&self.root, &def.path)?.exists()
                     || storage::safe_path(
                         &self.root,
-                        &format!(".gamemasterstudio/comments/{master_id}.json"),
+                        &format!("gamemasterstudio/comments/{master_id}.json"),
                     )?
                     .exists()
                 {
@@ -802,10 +802,7 @@ impl Project {
                 )?;
                 let comments = match git_bytes(
                     &self.root,
-                    &[
-                        "show",
-                        &format!("HEAD:.gamemasterstudio/comments/{id}.json"),
-                    ],
+                    &["show", &format!("HEAD:gamemasterstudio/comments/{id}.json")],
                 ) {
                     Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string())?,
                     Err(_) => Comments::default(),
@@ -1303,7 +1300,7 @@ fn files(data: &ProjectData) -> Result<BTreeMap<String, Vec<u8>>> {
             let def = &data.config.masters[id];
             files.insert(def.path.clone(), master.table.serialize(def)?);
             if let Some(bytes) = master.comments.serialize()? {
-                files.insert(format!(".gamemasterstudio/comments/{id}.json"), bytes);
+                files.insert(format!("gamemasterstudio/comments/{id}.json"), bytes);
             }
         }
     }

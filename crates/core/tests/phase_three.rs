@@ -199,7 +199,7 @@ fn changed_path_or_key_requires_whole_master_definition_choice() {
 }
 
 fn write_project(root: &Path, p: &ProjectData) {
-    fs::create_dir_all(root.join(".gamemasterstudio")).unwrap();
+    fs::create_dir_all(root.join("gamemasterstudio")).unwrap();
     fs::write(root.join(CONFIG_PATH), p.config.serialize().unwrap()).unwrap();
     for (id, def) in &p.config.masters {
         let path = root.join(&def.path);

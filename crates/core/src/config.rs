@@ -2,7 +2,7 @@ use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub const CONFIG_PATH: &str = ".gamemasterstudio/project.yaml";
+pub const CONFIG_PATH: &str = "gamemasterstudio/project.yaml";
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -61,7 +61,7 @@ pub fn normalize_csv_path(path: &str) -> Result<String> {
                 || p == ".."
                 || p == "."
                 || p.eq_ignore_ascii_case(".git")
-                || p.eq_ignore_ascii_case(".gamemasterstudio")
+                || p.eq_ignore_ascii_case("gamemasterstudio")
         })
         || !path.ends_with(".csv")
     {

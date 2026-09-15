@@ -109,7 +109,7 @@ fn read_side(root: &Path, stages: &Stages, side: u8, revision: &str) -> Result<P
     Ok(ProjectData { config, masters })
 }
 fn comment_path(id: &str) -> String {
-    format!(".gamemasterstudio/comments/{id}.json")
+    format!("gamemasterstudio/comments/{id}.json")
 }
 fn paths(data: &ProjectData) -> BTreeSet<String> {
     let mut out = BTreeSet::from([CONFIG_PATH.into()]);
@@ -168,7 +168,7 @@ impl MergeSession {
                     "-z",
                     revision,
                     "--",
-                    ".gamemasterstudio/comments/",
+                    "gamemasterstudio/comments/",
                 ],
             )?;
             for path in files.split(|b| *b == 0).filter(|p| !p.is_empty()) {
@@ -186,7 +186,7 @@ impl MergeSession {
         // Unknown metadata cannot be silently discarded during canonical output.
         for path in stages
             .keys()
-            .filter(|p| p.starts_with(".gamemasterstudio/comments/"))
+            .filter(|p| p.starts_with("gamemasterstudio/comments/"))
         {
             if !sources
                 .iter()

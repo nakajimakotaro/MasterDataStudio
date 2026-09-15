@@ -25,7 +25,7 @@ fn fixture() -> (tempfile::TempDir, Project) {
     );
     git(
         dir.path(),
-        &["add", ".gamemasterstudio/project.yaml", "masters/enemy.csv"],
+        &["add", "gamemasterstudio/project.yaml", "masters/enemy.csv"],
     )
     .unwrap();
     git(dir.path(), &["commit", "-m", "initial"]).unwrap();

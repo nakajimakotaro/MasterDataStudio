@@ -54,7 +54,7 @@ CSV とコメントは操作確定時に自動保存されます。Save ボタ�
 Repository 内に以下を保存します。
 
 ```text
-.gamemasterstudio/
+gamemasterstudio/
   project.yaml
   comments/
     enemy.json      # コメントが存在するときだけ

@@ -59,13 +59,13 @@ fn apply(p: &mut Project, op: Operation) {
     p.apply(op, p.snapshot().revision).unwrap();
 }
 fn write(root: &Path, data: &ProjectData) {
-    fs::create_dir_all(root.join(".gamemasterstudio/comments")).unwrap();
+    fs::create_dir_all(root.join("gamemasterstudio/comments")).unwrap();
     fs::create_dir_all(root.join("masters")).unwrap();
     fs::write(root.join(CONFIG_PATH), data.config.serialize().unwrap()).unwrap();
     for (id, def) in &data.config.masters {
         let m = data.masters[id].data.as_ref().unwrap();
         fs::write(root.join(&def.path), m.table.serialize(def).unwrap()).unwrap();
-        let path = root.join(format!(".gamemasterstudio/comments/{id}.json"));
+        let path = root.join(format!("gamemasterstudio/comments/{id}.json"));
         match m.comments.serialize().unwrap() {
             Some(b) => fs::write(path, b).unwrap(),
             None => {
@@ -289,7 +289,7 @@ fn blank_manual_comment_resolution_removes_last_file() {
     p.complete_merge("delete comment", s.revision).unwrap();
     assert!(!dir
         .path()
-        .join(".gamemasterstudio/comments/enemy.json")
+        .join("gamemasterstudio/comments/enemy.json")
         .exists());
     assert!(!p.snapshot().git.tracked_dirty);
 }
