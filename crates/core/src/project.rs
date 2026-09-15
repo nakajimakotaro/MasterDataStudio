@@ -144,6 +144,10 @@ pub enum Operation {
         master_id: String,
         edits: Vec<CellEdit>,
     },
+    CreateRows {
+        master_id: String,
+        rows: Vec<Vec<String>>,
+    },
     AddRow {
         master_id: String,
         primary_key: PrimaryKey,
@@ -482,6 +486,10 @@ impl Project {
                 for (row, col, value) in targets {
                     master.table.rows[row][col] = value;
                 }
+            }
+            Operation::CreateRows { master_id, rows } => {
+                let (master, _) = get_master(&mut next, &master_id)?;
+                master.table.rows.extend(rows);
             }
             Operation::AddRow {
                 master_id,

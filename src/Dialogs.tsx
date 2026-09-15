@@ -64,9 +64,6 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
   const [primaryKeys, setPrimaryKeys] = useState(
     def?.primaryKey.join("\n") ?? "id",
   );
-  const [keys, setKeys] = useState<string[]>(
-    def?.primaryKey.map(() => "") ?? [],
-  );
   const [column, setColumn] = useState(
     ui.dialog === "deleteColumn"
       ? (master?.table.columns.find((c) => !def.primaryKey.includes(c)) ?? "")
@@ -362,48 +359,6 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
             </div>
           </div>
           {footer("設定を適用", !editable || !!master.table.rows.length)}
-        </form>
-      </Modal>
-    );
-  if (ui.dialog === "addRow" || ui.dialog === "duplicateRow")
-    return (
-      <Modal title={ui.dialog === "addRow" ? "Row を追加" : "Row を複製"}>
-        <form
-          onSubmit={submit(
-            () =>
-              void edit({
-                type: "addRow",
-                masterId,
-                primaryKey: keys,
-                duplicateFrom:
-                  ui.dialog === "duplicateRow" ? ui.selectedKeys[0] : undefined,
-              }),
-          )}
-        >
-          <div className="modal-body">
-            <p className="hint">
-              新しい Primary Key を入力してください。作成後は変更できません。
-              {ui.dialog === "duplicateRow"
-                ? "値をコピーし、コメントはコピーしません。"
-                : "その他の Cell は空文字で作成します。"}
-            </p>
-            {def.primaryKey.map((c, i) => (
-              <label key={c}>
-                <span>
-                  <KeyRound size={13} /> {c}
-                </span>
-                <input
-                  required
-                  autoFocus={i === 0}
-                  value={keys[i]}
-                  onChange={(e) =>
-                    setKeys(keys.map((v, n) => (n === i ? e.target.value : v)))
-                  }
-                />
-              </label>
-            ))}
-          </div>
-          {footer("Row を作成", !editable || keys.some((k) => !k))}
         </form>
       </Modal>
     );

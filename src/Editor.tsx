@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { masterColumn, masterGridTheme } from "./MasterGrid";
 import { useBusy, useRepositoryAction } from "./api";
-import { useUI } from "./store";
+import { useUI, type DraftRow } from "./store";
 import {
   keyId,
   rowKey,
@@ -36,7 +36,8 @@ import {
   type Snapshot,
 } from "./types";
 
-type GridRow = { key: PrimaryKey; values: string[] };
+type GridRow = { key: PrimaryKey; values: string[]; draft?: boolean };
+const emptyDrafts: DraftRow[] = [];
 // Keep arbitrary user column names separate from AG Grid's internal column IDs.
 const columnName = (id: string) => (id.startsWith("data:") ? id.slice(5) : "");
 
@@ -56,30 +57,60 @@ export function Editor({
   const [visibleRows, setVisibleRows] = useState(master.table.rows.length);
   const [fillValue, setFillValue] = useState<string | null>(null);
   const [rangeCount, setRangeCount] = useState(0);
+  const newRowKey = useRef<string | null>(null);
   const grid = useRef<AgGridReact<GridRow>>(null);
   const def = project.data.config.masters[masterId];
   const editable = !!project.identity.name && !!project.identity.email && !project.git.protected && !project.git.mergeInProgress && !busy;
-  const rowData = useMemo(
-    () =>
-      master.table.rows.map((values) => ({
-        key: rowKey(values, master, def),
-        values,
-      })),
-    [master.table, def],
-  );
+  const draftScope = JSON.stringify([project.root, project.git.branch, masterId]);
+  const drafts = ui.drafts[draftScope] ?? emptyDrafts;
+  const setDrafts = (rows: typeof drafts) =>
+    ui.set({ drafts: { ...useUI.getState().drafts, [draftScope]: rows } });
+  const rowData = useMemo<GridRow[]>(() => [
+    ...master.table.rows.map((values) => ({ key: rowKey(values, master, def), values })),
+    ...drafts.map((row) => ({ key: row.key, values: master.table.columns.map(c => row.cells[c] ?? ""), draft: true })),
+  ], [master.table, def, drafts]);
+  const addRow = (source?: GridRow) => {
+    if (!editable) return;
+    const key = ["draft", crypto.randomUUID()];
+    newRowKey.current = keyId(key);
+    setDrafts([...drafts, { key, cells: Object.fromEntries(master.table.columns.map((c, i) =>
+      [c, source?.values[i] ?? ""])) }]);
+    ui.set({ search: "", selectedKeys: [key], cell: null });
+    api?.setFilterModel(null);
+  };
+  const deleteRows = (keys: PrimaryKey[]) => {
+    const ids = new Set(keys.map(keyId));
+    setDrafts(drafts.filter(row => !ids.has(keyId(row.key))));
+    const savedKeys = keys.filter(key => !drafts.some(row => keyId(row.key) === keyId(key)));
+    ui.set({ selectedKeys: savedKeys, cell: null, dialog: savedKeys.length ? "deleteRows" : null });
+  };
+  const saveDrafts = () => {
+    action.mutate({ command: "edit_project", operation: {
+      type: "createRows", masterId,
+      rows: drafts.map(row => master.table.columns.map(c => row.cells[c] ?? "")),
+    } }, { onSuccess: () => setDrafts([]) });
+  };
   const edit = (edits: CellEdit[]) => {
     if (!editable || !edits.length) return;
-    if (edits.some((e) => def.primaryKey.includes(e.column))) {
+    const isDraft = (e: CellEdit) => drafts.some(row => keyId(row.key) === keyId(e.primaryKey));
+    if (edits.some((e) => !isDraft(e) && def.primaryKey.includes(e.column))) {
       ui.set({
         error:
           "Primary Key を含む操作は、全体を適用できません。選択範囲を変更してください。",
       });
       return;
     }
-    action.mutate({
+    const updateDrafts = () => setDrafts(drafts.map(row => {
+      const cells = { ...row.cells };
+      for (const e of edits) if (keyId(e.primaryKey) === keyId(row.key)) cells[e.column] = e.value;
+      return { ...row, cells };
+    }));
+    const savedEdits = edits.filter(e => !isDraft(e));
+    if (savedEdits.length) action.mutate({
       command: "edit_project",
-      operation: { type: "editCells", masterId, edits },
-    });
+      operation: { type: "editCells", masterId, edits: savedEdits },
+    }, { onSuccess: updateDrafts });
+    else updateDrafts();
   };
   const selectionEdits = (value: string, copyTopRow = false): CellEdit[] => {
     if (!api) return [];
@@ -122,7 +153,7 @@ export function Editor({
         ...masterColumn<GridRow>(column, def.primaryKey),
         valueGetter: (p) => p.data?.values[index] ?? "",
         valueParser: (p) => String(p.newValue ?? ""),
-        editable: () => editable && !pk,
+        editable: (p) => editable && (!pk || !!p.data?.draft),
         tooltipValueGetter: (p) => {
           const comment = master.comments.cells.find(
             (c) =>
@@ -191,7 +222,7 @@ export function Editor({
       {
         name: "Row を追加",
         disabled: !editable,
-        action: () => ui.set({ dialog: "addRow" }),
+        action: () => addRow(),
       },
       {
         name: "この Row を複製",
@@ -199,7 +230,7 @@ export function Editor({
         action: () => {
           if (!node || !row) return;
           node.setSelected(true, true);
-          ui.set({ selectedKeys: [row.key], cell, dialog: "duplicateRow" });
+          addRow(row);
         },
       },
       {
@@ -209,7 +240,7 @@ export function Editor({
         disabled: !editable || !row,
         action: () => {
           if (!row) return;
-          ui.set({ selectedKeys, cell, dialog: "deleteRows" });
+          deleteRows(selectedKeys);
         },
       },
       ...(row ? ["separator", "copy", "copyWithHeaders"] as const : []),
@@ -282,7 +313,7 @@ export function Editor({
         <div className="toolbar-group">
           <button
             disabled={!editable}
-            onClick={() => ui.set({ dialog: "addRow" })}
+            onClick={() => addRow()}
           >
             <Plus size={16} />
             Row 追加
@@ -291,7 +322,7 @@ export function Editor({
             disabled={!editable || ui.selectedKeys.length !== 1}
             title="選択した Row を複製"
             aria-label="Row を複製"
-            onClick={() => ui.set({ dialog: "duplicateRow" })}
+            onClick={() => addRow(rowData.find(row => keyId(row.key) === keyId(ui.selectedKeys[0])))}
           >
             <Copy size={16} />
           </button>
@@ -299,7 +330,7 @@ export function Editor({
             disabled={!editable || !ui.selectedKeys.length}
             title="選択した Row を削除"
             aria-label="Row を削除"
-            onClick={() => ui.set({ dialog: "deleteRows" })}
+            onClick={() => deleteRows(ui.selectedKeys)}
           >
             <Trash2 size={16} />
           </button>
@@ -365,6 +396,10 @@ export function Editor({
           )}
         </button>
       </div>
+      {drafts.length > 0 && <div className="fill-bar">
+        <span>未保存の新規行: {drafts.length} 件 · Primary Key を入力して保存してください。</span>
+        <button className="primary" disabled={!editable || drafts.some(row => def.primaryKey.some(c => !row.cells[c]))} onClick={saveDrafts}>新規行を保存</button>
+      </div>}
       <div className="editor-content">
         <div className="grid-panel">
           <div className="table-comment">
@@ -380,7 +415,7 @@ export function Editor({
           <div className="grid-hint">
             <span>
               <KeyRound size={13} />
-              Primary Key は固定・編集不可
+              新規行の Primary Key は表で入力できます（保存後は固定）
             </span>
             <div>
               <button
@@ -491,6 +526,15 @@ export function Editor({
               quickFilterText={ui.search}
               processDataFromClipboard={paste}
               onGridReady={(e) => setApi(e.api)}
+              onRowDataUpdated={(e) => {
+                if (!newRowKey.current) return;
+                const node = e.api.getRowNode(newRowKey.current);
+                if (!node) return;
+                newRowKey.current = null;
+                node.setSelected(true, true);
+                e.api.ensureNodeVisible(node, "bottom");
+                if (node.rowIndex !== null) e.api.setFocusedCell(node.rowIndex, `data:${def.primaryKey[0]}`);
+              }}
               onModelUpdated={(e) =>
                 setVisibleRows(e.api.getDisplayedRowCount())
               }
@@ -530,7 +574,7 @@ export function Editor({
           <div className="grid-footer">
             <span>
               {visibleRows.toLocaleString()} /{" "}
-              {master.table.rows.length.toLocaleString()} rows
+              {rowData.length.toLocaleString()} rows
               <span className="footer-separator">·</span>
               {master.table.columns.length} columns
             </span>
@@ -547,6 +591,7 @@ export function Editor({
             masterId={masterId}
             master={master}
             def={def}
+            draft={rowData.find(row => row.draft && keyId(row.key) === keyId(ui.cell?.primaryKey ?? ui.selectedKeys[0] ?? []))}
             editable={editable}
           />
         )}
@@ -559,22 +604,24 @@ function Inspector({
   masterId,
   master,
   def,
+  draft,
   editable,
 }: {
   masterId: string;
   master: Master;
   def: Definition;
+  draft?: GridRow;
   editable: boolean;
 }) {
   const ui = useUI();
   const key =
     ui.cell?.primaryKey ??
     (ui.selectedKeys.length === 1 ? ui.selectedKeys[0] : null);
-  const row = key
+  const row = draft?.values ?? (key
     ? master.table.rows.find(
         (r) => keyId(rowKey(r, master, def)) === keyId(key),
       )
-    : null;
+    : null);
   const column = ui.cell?.column;
   const rowComment = master.comments.rows.find(
     (c) => keyId(c.primaryKey) === keyId(key ?? []),
@@ -596,7 +643,7 @@ function Inspector({
             {def.primaryKey.map((c, i) => (
               <div key={c}>
                 <span>{c}</span>
-                <code>{key[i]}</code>
+                <code>{draft ? draft.values[master.table.columns.indexOf(c)] || "未入力" : key[i]}</code>
               </div>
             ))}
           </div>
@@ -617,7 +664,7 @@ function Inspector({
           </p>
         )}
       </section>
-      {key && row && (
+      {key && row && !draft && (
         <CommentBox
           key={`row:${keyId(key)}:${rowComment?.body}`}
           label="Row Comment"
@@ -627,7 +674,7 @@ function Inspector({
           editable={editable}
         />
       )}
-      {key && row && column && (
+      {key && row && column && !draft && (
         <CommentBox
           key={`cell:${keyId(key)}:${column}:${cellComment?.body}`}
           label="Cell Comment"

@@ -570,3 +570,40 @@ fn comment_json_order_is_tuple_then_column_and_orphans_are_errors() {
     );
     assert!(comments.validate(&table, &def).is_err());
 }
+
+#[test]
+fn create_rows_saves_draft_values_atomically_and_supports_undo() {
+    let (dir, mut project) = fixture();
+    let before = project.snapshot();
+    let disk = bytes(dir.path(), "masters/waves.csv");
+    for rows in [
+        vec![vec!["", "1", "Slime", ""]],
+        vec![vec!["a", "1", "Slime", ""], vec!["a", "1", "Copy", ""]],
+        vec![vec!["a", "1"]],
+    ] {
+        let operation = Operation::CreateRows {
+            master_id: "waves".into(),
+            rows: rows
+                .into_iter()
+                .map(|r| r.into_iter().map(String::from).collect())
+                .collect(),
+        };
+        assert!(project.apply(operation, before.revision).is_err());
+        assert_eq!(project.snapshot().data, before.data);
+        assert_eq!(bytes(dir.path(), "masters/waves.csv"), disk);
+    }
+    apply(
+        &mut project,
+        serde_json::from_value(serde_json::json!({
+            "type": "createRows", "masterId": "waves",
+            "rows": [["a", "1", "Slime", "001"], ["a", "2", "Slime", "001"]]
+        }))
+        .unwrap(),
+    );
+    assert_eq!(
+        bytes(dir.path(), "masters/waves.csv"),
+        b"stage,wave,name,note\na,1,Slime,001\na,2,Slime,001\n"
+    );
+    project.undo(project.snapshot().revision).unwrap();
+    assert_eq!(project.snapshot().data, before.data);
+}

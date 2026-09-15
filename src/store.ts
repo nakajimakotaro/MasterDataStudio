@@ -3,8 +3,6 @@ import type { PrimaryKey } from "./types";
 
 export type Dialog =
   | "createMaster"
-  | "addRow"
-  | "duplicateRow"
   | "deleteRows"
   | "addColumn"
   | "deleteColumn"
@@ -17,7 +15,9 @@ export type Dialog =
   | "branch"
   | "history"
   | null;
+export type DraftRow = { key: PrimaryKey; cells: Record<string, string> };
 type UIState = {
+  drafts: Record<string, DraftRow[]>;
   masterId: string | null;
   selectedKeys: PrimaryKey[];
   cell: { primaryKey: PrimaryKey; column: string } | null;
@@ -30,6 +30,7 @@ type UIState = {
 };
 
 export const useUI = create<UIState>((set) => ({
+  drafts: {},
   masterId: null,
   selectedKeys: [],
   cell: null,

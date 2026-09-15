@@ -57,6 +57,7 @@ export type CellEdit = {
   value: string;
 };
 export type Operation =
+  | { type: "createRows"; masterId: string; rows: string[][] }
   | { type: "setProtectedBranches"; patterns: string[] }
   | { type: "editCells"; masterId: string; edits: CellEdit[] }
   | {
