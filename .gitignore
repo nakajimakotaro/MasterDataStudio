@@ -1,0 +1,10 @@
+node_modules/
+dist/
+target/
+.pnpm-store/
+.DS_Store
+.env
+.env.local
+.env.*.local
+src-tauri/gen/
+*.tsbuildinfo
