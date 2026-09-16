@@ -19,8 +19,8 @@ function HistoryBrowser({ project }: { project: Snapshot }) {
   return <div className="history-panel">
     <p className="hint">{project.git.branch || "detached HEAD"} · コミットを探し、対象・列で差分を絞り込めます。Merge は先頭の親と比較します。</p>
     <form className="result-filters" onSubmit={e => { e.preventDefault(); setSearch({ query: query.trim(), author: author.trim() }); setCursors([null]); setSelected(null); }}>
-      <label>コミットメッセージ<input value={query} onChange={e => setQuery(e.target.value)} placeholder="全履歴から検索" /></label>
-      <label>作成者<input value={author} onChange={e => setAuthor(e.target.value)} placeholder="名前・メール" /></label>
+      <label>コミットメッセージ<input value={query} onChange={e => setQuery(e.target.value)} placeholder="全履歴から検索" autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>
+      <label>作成者<input value={author} onChange={e => setAuthor(e.target.value)} placeholder="名前・メール" autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>
       <button type="submit">検索</button>
       <button type="button" onClick={() => { setQuery(""); setAuthor(""); setSearch({ query: "", author: "" }); setCursors([null]); setSelected(null); void history.refetch(); }}>最新の履歴へ</button>
     </form>
@@ -59,7 +59,7 @@ function CommitDetail({ root, commit }: { root: string; commit: HistoryCommit })
       <label>対象<select value={filter.master} onChange={e => update({ master: e.target.value, column: "", kind: "" })}><option value="">すべての Master</option>{Object.entries(data?.masters ?? (filter.master ? { [filter.master]: 0 } : {})).map(([id, n]) => <option key={id} value={id}>{id} ({n.toLocaleString()})</option>)}</select></label>
       <label>種類<select value={filter.kind} onChange={e => update({ kind: e.target.value })}><option value="">すべて</option>{Object.entries(data?.kinds ?? (filter.kind ? { [filter.kind]: 0 } : {})).map(([id, n]) => <option key={id} value={id}>{changeLabels[id] ?? id} ({n.toLocaleString()})</option>)}</select></label>
       <label>列<select value={filter.column} onChange={e => update({ column: e.target.value })}><option value="">すべての列</option>{Object.entries(data?.columns ?? (filter.column ? { [filter.column]: 0 } : {})).map(([id, n]) => <option key={id} value={id}>{id} ({n.toLocaleString()})</option>)}</select></label>
-      <label>差分内検索<input value={query} onChange={e => setQuery(e.target.value)} placeholder="キー・変更前後の値" /></label><button>絞り込む</button>
+      <label>差分内検索<input value={query} onChange={e => setQuery(e.target.value)} placeholder="キー・変更前後の値" autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label><button>絞り込む</button>
     </form>
     {detail.isPending && <p role="status">変更内容を読み込み中…</p>}
     {detail.error && <div role="alert" className="inline-error">変更内容を読み込めません: {String(detail.error)} <button onClick={() => void detail.refetch()}>再試行</button></div>}

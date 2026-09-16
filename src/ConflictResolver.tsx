@@ -86,7 +86,7 @@ export function ConflictResolver({ project }: { project: Snapshot }) {
       <label>種類<select value={filter.kind} disabled={busy} onChange={e => changeFilter({ kind: e.target.value })}><option value="">すべて</option>{Object.entries(labels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
       <label>列<select value={filter.column} disabled={busy} onChange={e => changeFilter({ column: e.target.value })}><option value="">すべての列</option>{groups.columns.map(id => <option key={id}>{id}</option>)}</select></label>
       <label>状態<select value={filter.status} disabled={busy} onChange={e => changeFilter({ status: e.target.value as ConflictFilter["status"] })}><option value="unresolved">未解決</option><option value="resolved">解決済み</option><option value="all">すべて</option></select></label>
-      <label>競合内検索<input value={search} disabled={busy} onChange={e => setSearch(e.target.value)} placeholder="キー・Base・両ブランチの値" /></label><button disabled={busy}>絞り込む</button>
+      <label>競合内検索<input value={search} disabled={busy} onChange={e => setSearch(e.target.value)} placeholder="キー・Base・両ブランチの値" autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label><button disabled={busy}>絞り込む</button>
       <button type="button" disabled={busy} onClick={() => { setSearch(""); changeFilter(emptyConflictFilter); }}>条件をクリア</button>
     </form>
     <div className="batch-toolbar">
@@ -119,7 +119,7 @@ export function ConflictResolver({ project }: { project: Snapshot }) {
       {current && <ConflictDetail key={`${current.id}:${project.revision}`} conflict={current} editable={editable} onResolve={resolution => action.mutate({ command: "resolve_conflict", id: current.id, resolution })} />}
     </div>
     <div className="merge-footer">
-      <label>Merge commit message（省略可）<input value={message} onChange={e => setMessage(e.target.value)} placeholder="Git の Merge message を使用" disabled={busy} /></label>
+      <label>Merge commit message（省略可）<input value={message} onChange={e => setMessage(e.target.value)} placeholder="Git の Merge message を使用" disabled={busy} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>
       <button className="primary" disabled={!editable || merge.remaining > 0 || !!merge.error} onClick={() => action.mutate({ command: "complete_merge", message })}>Complete Merge</button>
       <p className="hint">全件解決後、変更を保存・Stage し、Merge commit を作成します。途中で Project を閉じた場合、再度解決が必要です。</p>
     </div>
@@ -137,7 +137,7 @@ function ConflictDetail({ conflict: c, editable, onResolve }: { conflict: Confli
       {c.resolution && <span className="hint">選択済み・完了前に変更できます</span>}
     </div>
     {(c.kind === "cell" || c.kind === "comment") && <form onSubmit={e => { e.preventDefault(); if (editable) onResolve({ kind: "custom", value: custom }); }}>
-      <label>{c.kind === "comment" ? "Combine / Edit manually（空白のみで削除）" : "Custom（空文字も指定できます）"}<textarea rows={4} value={custom} disabled={!editable} onChange={e => setCustom(e.target.value)} /></label>
+      <label>{c.kind === "comment" ? "Combine / Edit manually（空白のみで削除）" : "Custom（空文字も指定できます）"}<textarea rows={4} value={custom} disabled={!editable} onChange={e => setCustom(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>
       <button disabled={!editable} className={(c.resolution?.kind === "custom" || c.resolution?.kind === "comment") ? "primary" : ""}>この値で Resolve</button>
     </form>}
   </article>;

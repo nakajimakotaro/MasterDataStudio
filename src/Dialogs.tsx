@@ -146,6 +146,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Taro Yamada"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
               />
             </label>
             <label>
@@ -156,6 +160,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="taro@example.com"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
               />
             </label>
           </div>
@@ -165,7 +173,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
           <div className="modal-body">
             <h3>Protected Branches</h3>
             <p className="hint">1 行に 1 pattern。大文字・小文字を区別します。例: main、develop、release/*</p>
-            <label>保護する Branch<textarea rows={4} value={patterns} readOnly={!editable} onChange={e => setPatterns(e.target.value)} /></label>
+            <label>保護する Branch<textarea rows={4} value={patterns} readOnly={!editable} onChange={e => setPatterns(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>
             <p className="hint">設定は Project Config に自動保存し、Commit で共有します。変更は保護対象に含まれない Working Branch で行ってください。</p>
             {project.git.protected && <button type="button" disabled={busy || project.git.trackedDirty || project.git.mergeInProgress} onClick={() => ui.set({ dialog: "branch" })}>Working Branch を作成</button>}
           </div>
@@ -180,7 +188,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
     })}>
       <div className="modal-body">
         <p className="hint">{project.git.branch} に別の Branch を取り込みます。競合した場合は Conflict Resolver で解決します。</p>
-        <label>Incoming Branch<input required autoFocus list="merge-branches" value={branch} onChange={e => setBranch(e.target.value)} placeholder="feature/enemy-balance" /></label>
+        <label>Incoming Branch<input required autoFocus list="merge-branches" value={branch} onChange={e => setBranch(e.target.value)} placeholder="feature/enemy-balance" autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>
         <datalist id="merge-branches">{project.git.branches.filter(b => b !== project.git.branch).map(b => <option key={b} value={b} />)}</datalist>
       </div>
       {footer("Merge", !branch.trim() || project.git.trackedDirty || project.git.mergeInProgress || project.git.protected)}
@@ -203,6 +211,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
             aria-describedby="branch-search-hint"
             onChange={(e) => { setBranchQuery(e.target.value); setBranch(""); }}
             onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }}
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            autoComplete="off"
           />
         </label>
         <p id="branch-search-hint" className="hint">名前の一部で検索できます。大文字・小文字は区別せず、空白で複数のキーワードを指定できます。</p>
@@ -227,7 +239,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
         </p>
         {branch && <p className="branch-selection">選択中: <code>{branch}</code></p>}
       </>}
-      {createBranch && <label>新しい Branch<input required autoFocus value={branch} onChange={e=>setBranch(e.target.value)} placeholder="feature/master-update" /></label>}
+      {createBranch && <label>新しい Branch<input required autoFocus value={branch} onChange={e=>setBranch(e.target.value)} placeholder="feature/master-update" autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>}
       <label className="check-row"><input type="checkbox" checked={createBranch} disabled={busy} onChange={e=>{setCreateBranch(e.target.checked);setBranch("");setBranchQuery("")}} />新規作成して切り替える</label></div>
       {footer(createBranch ? "作成して切替" : "切替", !branch.trim() || (!createBranch && !filteredBranches.includes(branch)) || project.git.trackedDirty || project.git.mergeInProgress)}
     </form></Modal>;
@@ -237,7 +249,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
 
   if (ui.dialog === "commit")
     return <Modal title="Commit"><form onSubmit={submit(()=>{void action.mutateAsync({command:"commit",message,push:false}).then(()=>ui.set({dialog:null})).catch(()=>{});})}>
-      <div className="modal-body"><p>{project.changes.length} semantic changes を一括 Commit します。</p><label>Commit message<textarea required autoFocus rows={4} value={message} onChange={e=>setMessage(e.target.value)} /></label></div>
+      <div className="modal-body"><p>{project.changes.length} semantic changes を一括 Commit します。</p><label>Commit message<textarea required autoFocus rows={4} value={message} onChange={e=>setMessage(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label></div>
       <div className="modal-footer"><button type="button" disabled={busy} onClick={()=>ui.set({dialog:"changes"})}>戻る</button><button type="button" disabled={busy||!editable||!message.trim()} onClick={()=>{void action.mutateAsync({command:"commit",message,push:true}).then(()=>ui.set({dialog:null})).catch(()=>{})}}>Commit & Push</button><button className="primary" disabled={busy||!editable||!message.trim()}>Commit</button></div>
     </form></Modal>;
 
@@ -270,6 +282,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 value={id}
                 onChange={(e) => setId(e.target.value)}
                 placeholder="enemy"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
               />
             </label>
             <label>
@@ -278,6 +294,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
                 placeholder={`masters/${id || "enemy"}.csv`}
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
               />
             </label>
             <div className="form-columns">
@@ -288,6 +308,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                   rows={5}
                   value={columns}
                   onChange={(e) => setColumns(e.target.value)}
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  autoComplete="off"
                 />
               </label>
               <label>
@@ -297,6 +321,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                   rows={5}
                   value={primaryKeys}
                   onChange={(e) => setPrimaryKeys(e.target.value)}
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  autoComplete="off"
                 />
               </label>
             </div>
@@ -333,6 +361,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 readOnly={!!master.table.rows.length}
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
               />
             </label>
             <label>
@@ -342,6 +374,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 readOnly={!!master.table.rows.length}
                 value={primaryKeys}
                 onChange={(e) => setPrimaryKeys(e.target.value)}
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
               />
             </label>
             <div className="column-list">
@@ -408,6 +444,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 value={column}
                 onChange={(e) => setColumn(e.target.value)}
                 placeholder="defense"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                autoComplete="off"
               />
             </label>
             <p className="hint">

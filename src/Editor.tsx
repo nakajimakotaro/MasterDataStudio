@@ -480,6 +480,10 @@ export function Editor({
             value={ui.search}
             onChange={(e) => ui.set({ search: e.target.value })}
             placeholder="検索…"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            autoComplete="off"
           />
         </label>
         <button
@@ -516,6 +520,10 @@ export function Editor({
                   autoFocus
                   value={fillValue}
                   onChange={(e) => setFillValue(e.target.value)}
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  autoComplete="off"
                 />
               </label>
               <button className="primary" disabled={!editable}>
@@ -830,6 +838,10 @@ function CommentBox({
           }}
           placeholder="コメントを追加…"
           rows={target.kind === "table" ? 2 : 3}
+          autoCorrect="off"
+          autoCapitalize="none"
+          spellCheck={false}
+          autoComplete="off"
         />
       </label>
       {comment && (

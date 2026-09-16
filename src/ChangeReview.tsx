@@ -119,7 +119,7 @@ function ReviewMaster({ data, masterId, disabled }: { data: ChangeReviewData; ma
       <div className="review-legend" aria-label="差分の色"><Badge tone="added" /><Badge tone="modified" /><Badge tone="deleted" /></div>
       <label className="review-filter"><input type="checkbox" checked={onlyChanged} onChange={e => setOnlyChanged(e.target.checked)} />変更のある行のみ</label>
       <div className="toolbar-spacer" />
-      <label className="search-box"><Search size={16} /><input aria-label="レビュー内を検索" placeholder="検索…" value={search} onChange={e => setSearch(e.target.value)} /></label>
+      <label className="search-box"><Search size={16} /><input aria-label="レビュー内を検索" placeholder="検索…" value={search} onChange={e => setSearch(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label>
     </div>}
     <div className="editor-content review-content">
       {table && <div className="grid-panel">

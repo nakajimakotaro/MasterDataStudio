@@ -53,6 +53,7 @@ CSV とコメントは操作確定時に自動保存されます。Save ボタ�
 - Undo / Redo は Project 全体の操作履歴で、直近 100 操作。Project の開き直し、終了で消えます。新しい編集で Redo を消去します。
 - 空の Master では Settings から path / Primary Key を変更できます。Row があれば読み取り専用です。
 - CSV / コメントを正しく読み込めない Master はエラー表示で編集を無効化します。他の Master は引き続き操作できます。
+- 入力欄では OS の自動大文字化・自動修正・スペルチェック・入力補完（オートフィル）を無効化しています。Branch 名、Master ID、CSV path など、大文字と小文字を区別する値をそのまま入力できます。AG Grid のセル編集のみ、Grid が生成する入力欄のためブラウザ既定の挙動が残ります。
 
 ## Project Config
 
