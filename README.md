@@ -87,8 +87,6 @@ pnpm install
 pnpm tauri dev
 ```
 
-> グリッドにはAG Grid Enterpriseを使用しています。ライセンスキー未設定時は評価モードになり、ウォーターマークが表示されます。ライセンスは付属しません。取得済みのキーは、`.env.example`をコピーした`.env.local`の`VITE_AG_GRID_LICENSE_KEY`に設定してください。
-
 ### 最初のテーブルを作る
 
 1. **Project を初期化**から、データを保存するフォルダを選びます。
