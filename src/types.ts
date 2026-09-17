@@ -13,12 +13,20 @@ export type Comments = {
   rows: { primaryKey: PrimaryKey; comment: Comment }[];
   cells: { primaryKey: PrimaryKey; column: string; comment: Comment }[];
 };
+export type Scripts = { version: number; columns: { column: string; script: string; overrides: PrimaryKey[] }[] };
+export type ScriptTarget = { masterId: string; primaryKey: PrimaryKey; column: string };
+export type PreparedEdit = { data: Snapshot["data"]; targets: ScriptTarget[] };
+export type CalculatedCell = CellEdit & { masterId: string };
 export type Master = {
+  scripts?: Scripts;
+  scriptError?: string | null;
   table: { columns: string[]; rows: string[][] };
   comments: Comments;
 };
 export type Definition = { path: string; primaryKey: string[] };
 export type Snapshot = {
+  safeMode?: boolean;
+  scriptChanges?: string[];
   root: string;
   name: string;
   identity: Identity;
@@ -57,6 +65,11 @@ export type CellEdit = {
   value: string;
 };
 export type Operation =
+  | { type: "revertChange"; change: SemanticChange }
+  | { type: "setScript"; masterId: string; column: string; script: string | null }
+  | { type: "replaceScripts"; masterId: string; scripts: Scripts }
+  | { type: "removeOverride"; masterId: string; primaryKey: PrimaryKey; column: string }
+  | { type: "recalculateScripts"; masterId: string }
   | { type: "createRows"; masterId: string; rows: string[][] }
   | { type: "setProtectedBranches"; patterns: string[] }
   | { type: "editCells"; masterId: string; edits: CellEdit[] }

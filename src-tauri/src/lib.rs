@@ -52,15 +52,17 @@ fn remember(app: &tauri::AppHandle, root: &str) -> Result<(), String> {
 fn open_project(
     path: String,
     initialize: bool,
+    safe_mode: Option<bool>,
     app: tauri::AppHandle,
     state: State<AppState>,
 ) -> Result<Snapshot, String> {
     let mut current = state.0.lock().map_err(|e| e.to_string())?;
-    let project = if initialize {
+    let mut project = if initialize {
         Project::initialize(Path::new(&path))?
     } else {
         Project::open(Path::new(&path))?
     };
+    project.safe_mode = safe_mode.unwrap_or(false);
     let snapshot = project.snapshot();
     // A failed local preference write must not turn a successful repository open into a failure.
     if let Err(error) = remember(&app, &snapshot.root) {
@@ -95,10 +97,26 @@ fn get_project(state: State<AppState>) -> Result<Snapshot, String> {
 #[tauri::command(async)]
 fn edit_project(
     operation: Operation,
+    calculated: Option<Vec<gamemasterstudio_core::scripts::CalculatedCell>>,
     revision: u64,
     state: State<AppState>,
 ) -> Result<Snapshot, String> {
-    with_project(state, |p| p.apply(operation, revision))
+    with_project(state, |p| {
+        p.apply_calculated(operation, calculated.unwrap_or_default(), revision)
+    })
+}
+
+#[tauri::command(async)]
+fn preview_edit(
+    operation: Operation,
+    revision: u64,
+    state: State<AppState>,
+) -> Result<gamemasterstudio_core::scripts::PreparedEdit, String> {
+    let current = state.0.lock().map_err(|e| e.to_string())?;
+    current
+        .as_ref()
+        .ok_or("Repository を開いてください。")?
+        .preview(operation, revision)
 }
 
 #[tauri::command(async)]
@@ -244,6 +262,7 @@ pub fn run() {
             close_project,
             get_project,
             edit_project,
+            preview_edit,
             undo,
             redo,
             set_identity,

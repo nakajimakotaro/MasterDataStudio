@@ -124,7 +124,7 @@ export function Editor({
     const added = sources.map((source) => ({
       key: ["draft", crypto.randomUUID()],
       cells: Object.fromEntries(master.table.columns.map((c, i) =>
-        [c, source.values[i] ?? ""])),
+        [c, def.primaryKey.includes(c) || master.scripts?.columns.some(s => s.column === c) ? "" : source.values[i] ?? ""])),
     }));
     newRowKeys.current = added.map(row => keyId(row.key));
     setDrafts([...drafts, ...added]);
@@ -227,16 +227,28 @@ export function Editor({
         ...masterColumn<GridRow>(column, def.primaryKey),
         valueGetter: (p) => p.data?.values[index] ?? "",
         valueParser: (p) => String(p.newValue ?? ""),
-        editable,
+        headerName: `${column}${master.scripts?.columns.some(s => s.column === column) ? " ƒ" : ""}`,
+        editable: (p) => editable && (!!p.data?.draft || !master.scripts?.columns.length || !def.primaryKey.includes(column)),
+        mainMenuItems: (p) => [
+          ...p.defaultItems,
+          ...(!def.primaryKey.includes(column) ? [{
+            name: master.scripts?.columns.some(s => s.column === column) ? "Edit Script" : "Set Script",
+            action: () => useUI.getState().set({ dialog: "columnScript", scriptColumn: column }),
+          }] : []),
+        ],
         tooltipValueGetter: (p) => {
           const comment = master.comments.cells.find(
             (c) =>
               keyId(c.primaryKey) === keyId(p.data?.key ?? []) &&
               c.column === column,
           );
-          return comment?.comment.body ?? String(p.value ?? "");
+          const script = master.scripts?.columns.find(s => s.column === column);
+          const override = script?.overrides.some(k => keyId(k) === keyId(p.data?.key ?? []));
+          return [override ? "Manual Override" : script ? "Column Script ƒ" : "", comment?.comment.body ?? String(p.value ?? "")].filter(Boolean).join("\n");
         },
         cellClassRules: {
+          "script-cell": () => !!master.scripts?.columns.some(s => s.column === column),
+          "script-override-cell": (p) => !!master.scripts?.columns.find(s => s.column === column)?.overrides.some(k => keyId(k) === keyId(p.data?.key ?? [])),
           "commented-cell": (p) =>
             master.comments.cells.some(
               (c) =>
@@ -246,7 +258,7 @@ export function Editor({
         },
       };
     });
-  }, [def, master.table.columns, master.comments, editable]);
+  }, [def, master.table.columns, master.comments, master.scripts, editable]);
 
   const paste = (params: ProcessDataFromClipboardParams<GridRow>) => {
     const focus = params.api.getFocusedCell();
@@ -318,6 +330,11 @@ export function Editor({
           deleteRows(selectedKeys);
         },
       },
+      ...(cell && !row?.draft && master.scripts?.columns.find(s => s.column === column)?.overrides.some(k => keyId(k) === keyId(cell.primaryKey)) ? [{
+        name: "Remove Override",
+        disabled: !editable,
+        action: () => action.mutate({ command: "edit_project", operation: { type: "removeOverride", masterId, ...cell } }),
+      }] : []),
       ...(row ? ["separator", "copy", "copyWithHeaders"] as const : []),
     ];
   };
@@ -390,6 +407,7 @@ export function Editor({
           </button>
         </div>
       </div>
+      {master.scriptError && <div className="script-metadata-error" role="alert">Script metadata: {master.scriptError} {project.safeMode ? "Column Script から修正できます。" : "Safe Mode で開いて修正してください。"}</div>}
       <div className="editor-toolbar">
         <div className="toolbar-group">
           <button
@@ -437,6 +455,10 @@ export function Editor({
           >
             <Trash2 size={16} />
           </button>
+        </div>
+        <div className="toolbar-group">
+          <button disabled={busy || (!master.table.columns.some(c => !def.primaryKey.includes(c)) && !(project.safeMode && master.scriptError))} onClick={() => ui.set({ dialog: "columnScript", scriptColumn: null })}>ƒ Column Script</button>
+          <button disabled={!editable || project.safeMode || !master.scripts?.columns.length || !!master.scriptError} title="Manual Override を維持して全 Script を再計算" onClick={() => action.mutate({ command: "edit_project", operation: { type: "recalculateScripts", masterId } })}>再計算</button>
         </div>
         <div className="toolbar-group">
           <button
@@ -612,7 +634,7 @@ export function Editor({
               onFillStart={() => fillEdits.current.start()}
               onFillEnd={() => edit(fillEdits.current.finish())}
               onCellEditRequest={(e) => {
-                if (String(e.newValue ?? "") === String(e.oldValue ?? "")) return;
+                if (String(e.newValue ?? "") === String(e.oldValue ?? "") && !master.scripts?.columns.some(s => s.column === columnName(e.column.getColId()))) return;
                 edit(fillEdits.current.request({
                   primaryKey: e.data.key,
                   column: columnName(e.column.getColId()),

@@ -69,6 +69,9 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
       ? (master?.table.columns.find((c) => !def.primaryKey.includes(c)) ?? "")
       : "",
   );
+  const [scriptColumn, setScriptColumn] = useState(ui.scriptColumn ?? master?.table.columns.find(c => !def.primaryKey.includes(c)) ?? "");
+  const [scriptBody, setScriptBody] = useState(master?.scripts?.columns.find(s => s.column === (ui.scriptColumn ?? master?.table.columns.find(c => !def.primaryKey.includes(c))))?.script ?? 'return "";');
+  const [scriptMetadata, setScriptMetadata] = useState(JSON.stringify(master?.scripts, null, 2));
   const [name, setName] = useState(project.identity.name);
   const [email, setEmail] = useState(project.identity.email);
   const [message, setMessage] = useState("");
@@ -113,6 +116,36 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
       </button>
     </div>
   );
+
+  if (ui.dialog === "columnScript" && master) {
+    const existing = master.scripts?.columns.find(s => s.column === scriptColumn);
+    const recovery = !!master.scriptError && project.safeMode;
+    return <Modal title={recovery ? "Script metadata の修正" : "Column Script"}>
+      <form onSubmit={submit(() => {
+        if (recovery) {
+          try { void edit({ type: "replaceScripts", masterId, scripts: JSON.parse(scriptMetadata) }); }
+          catch (error) { ui.set({ error: String(error) }); }
+        } else { void edit({ type: "setScript", masterId, column: scriptColumn, script: scriptBody }); }
+      })}>
+        <div className="modal-body">
+          {project.safeMode && <p className="script-mode-notice">SAFE MODE — Script は実行せず、定義だけを保存します。</p>}
+          {recovery ? <>
+            <p className="inline-error">{master.scriptError}</p>
+            <label>Script metadata (JSON)<textarea className="script-code" rows={16} value={scriptMetadata} onChange={e => setScriptMetadata(e.target.value)} spellCheck={false} /></label>
+          </> : <>
+            <label>Column<select value={scriptColumn} onChange={e => {
+              setScriptColumn(e.target.value);
+              setScriptBody(master.scripts?.columns.find(s => s.column === e.target.value)?.script ?? 'return "";');
+            }}>{master.table.columns.filter(c => !def.primaryKey.includes(c)).map(c => <option key={c} value={c}>{c}{master.scripts?.columns.some(s => s.column === c) ? " ƒ" : ""}</option>)}</select></label>
+            <label>JavaScript<textarea className="script-code" rows={12} value={scriptBody} onChange={e => setScriptBody(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" /></label>
+            <p className="hint">row には同じ行の通常 Column の文字列が入ります。string / number / boolean を return してください。手動上書きしたセルは再計算されません。</p>
+            {existing && <button type="button" className="danger-button" disabled={!editable || busy} onClick={() => void edit({ type: "setScript", masterId, column: scriptColumn, script: null })}>Remove Script（現在値を維持）</button>}
+          </>}
+        </div>
+        {footer("保存", !editable || (!recovery && !scriptColumn))}
+      </form>
+    </Modal>;
+  }
 
   if (ui.dialog === "history")
     return <Modal title="History"><History project={project} /></Modal>;
@@ -249,7 +282,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
 
   if (ui.dialog === "commit")
     return <Modal title="Commit"><form onSubmit={submit(()=>{void action.mutateAsync({command:"commit",message,push:false}).then(()=>ui.set({dialog:null})).catch(()=>{});})}>
-      <div className="modal-body"><p>{project.changes.length} semantic changes を一括 Commit します。</p><label>Commit message<textarea required autoFocus rows={4} value={message} onChange={e=>setMessage(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label></div>
+      <div className="modal-body"><p>{project.changes.length} semantic changes と Script metadata {project.scriptChanges?.length ?? 0} ファイルを一括 Commit します。</p><label>Commit message<textarea required autoFocus rows={4} value={message} onChange={e=>setMessage(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label></div>
       <div className="modal-footer"><button type="button" disabled={busy} onClick={()=>ui.set({dialog:"changes"})}>戻る</button><button type="button" disabled={busy||!editable||!message.trim()} onClick={()=>{void action.mutateAsync({command:"commit",message,push:true}).then(()=>ui.set({dialog:null})).catch(()=>{})}}>Commit & Push</button><button className="primary" disabled={busy||!editable||!message.trim()}>Commit</button></div>
     </form></Modal>;
 

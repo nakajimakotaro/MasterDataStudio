@@ -239,12 +239,12 @@ button.icon-button {
   display: grid;
   gap: 9px;
 }
-.recent-list > button {
+.recent-project-actions > button:first-child {
   justify-content: flex-start;
   text-align: left;
   padding: 16px;
 }
-.recent-list > button > span:nth-child(2) {
+.recent-project-actions > button:first-child > span:nth-child(2) {
   flex: 1;
   min-width: 0;
 }
@@ -1520,3 +1520,13 @@ dialog:has(.history-panel) { width: min(1500px, 96vw); max-width: 96vw; }
   .conflict-workspace .result-table-wrap { max-height: 40vh; }
   .result-table { min-width: 550px; }
 }
+
+.script-mode-notice { padding: 12px 20px; background: #fff1cd; color: #735512; font-weight: 600; border-bottom: 1px solid #e8ce85; }
+.script-metadata-error { padding: 12px 24px; color: #913e43; background: #fbe4e4; }
+.script-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2; line-height: 1.6; resize: vertical; }
+.ag-cell.script-cell { background-color: #edf4fa; }
+.ag-cell.script-override-cell { background-color: #fff0cf; box-shadow: inset 3px 0 #cb942a; }
+.recent-project-actions { display: flex; gap: 10px; align-items: stretch; }
+.recent-project-actions > button:first-child { flex: 1; min-width: 0; }
+.recent-project-actions > button:last-child { width: auto; white-space: nowrap; }
+.error-toast p, .modal-error p { white-space: pre-wrap; }

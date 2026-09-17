@@ -2,6 +2,7 @@ use crate::{
     comments::{CommentTarget, Comments, Identity},
     config::{validate_column, GitConfig, MasterDefinition, ProjectConfig, CONFIG_PATH},
     csv_data::{PrimaryKey, Table},
+    scripts::{CalculatedCell, ColumnScript, PreparedEdit, Scripts},
     storage::{self, FileChange},
     Result,
 };
@@ -17,6 +18,10 @@ use std::{
 pub struct Master {
     pub table: Table,
     pub comments: Comments,
+    #[serde(default)]
+    pub scripts: Scripts,
+    #[serde(default, rename = "scriptError")]
+    pub script_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -41,6 +46,8 @@ pub struct ChangeReview {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
+    pub safe_mode: bool,
+    pub script_changes: Vec<String>,
     pub root: String,
     pub name: String,
     pub identity: Identity,
@@ -122,7 +129,7 @@ pub enum SemanticChange {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CellEdit {
     pub primary_key: PrimaryKey,
@@ -130,13 +137,33 @@ pub struct CellEdit {
     pub value: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
 pub enum Operation {
+    RevertChange {
+        change: SemanticChange,
+    },
+    SetScript {
+        master_id: String,
+        column: String,
+        script: Option<String>,
+    },
+    ReplaceScripts {
+        master_id: String,
+        scripts: Scripts,
+    },
+    RemoveOverride {
+        master_id: String,
+        primary_key: PrimaryKey,
+        column: String,
+    },
+    RecalculateScripts {
+        master_id: String,
+    },
     SetProtectedBranches {
         patterns: Vec<String>,
     },
@@ -184,6 +211,7 @@ pub enum Operation {
 }
 
 pub struct Project {
+    pub safe_mode: bool,
     pub(crate) merge: Option<crate::merge_git::MergeSession>,
     pub(crate) root: PathBuf,
     pub(crate) data: ProjectData,
@@ -229,6 +257,7 @@ impl Project {
             let data = crate::merge_git::read_source(&root, "HEAD")?;
             let merge = Some(crate::merge_git::MergeSession::recover(&root));
             return Ok(Self {
+                safe_mode: false,
                 identity: identity(&root),
                 root,
                 data,
@@ -258,7 +287,21 @@ impl Project {
                     None => Comments::default(),
                 };
                 comments.validate(&table, def)?;
-                Ok(Master { table, comments })
+                let script_path =
+                    storage::safe_path(&root, &format!("gamemasterstudio/scripts/{id}.json"))?;
+                let mut scripts: Scripts = storage::read_optional(&script_path)?
+                    .map(|bytes| {
+                        serde_json::from_slice(&bytes).map_err(|e| format!("Script JSON: {e}"))
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+                let script_error = scripts.validate(&table, def).err();
+                Ok(Master {
+                    table,
+                    comments,
+                    scripts,
+                    script_error,
+                })
             };
             masters.insert(
                 id.clone(),
@@ -275,6 +318,7 @@ impl Project {
             );
         }
         Ok(Self {
+            safe_mode: false,
             merge: None,
             identity: identity(&root),
             root,
@@ -322,6 +366,8 @@ impl Project {
         let changes_error = changes.as_ref().err().cloned();
         let changes = changes.unwrap_or_default();
         Snapshot {
+            safe_mode: self.safe_mode,
+            script_changes: self.script_changes().unwrap_or_default(),
             root: self.root.to_string_lossy().into_owned(),
             name: self
                 .root
@@ -382,10 +428,135 @@ impl Project {
         Ok(())
     }
 
+    pub fn preview(&self, operation: Operation, revision: u64) -> Result<PreparedEdit> {
+        self.check_script_operation(&operation, revision)?;
+        self.prepare(operation)
+    }
+
     pub fn apply(&mut self, operation: Operation, revision: u64) -> Result<Snapshot> {
-        self.writable(revision)?;
+        self.apply_calculated(operation, vec![], revision)
+    }
+
+    pub fn apply_calculated(
+        &mut self,
+        operation: Operation,
+        calculated: Vec<CalculatedCell>,
+        revision: u64,
+    ) -> Result<Snapshot> {
+        self.check_script_operation(&operation, revision)?;
+        let PreparedEdit { mut data, targets } = self.prepare(operation)?;
+        let mut expected: BTreeSet<_> = targets
+            .iter()
+            .map(|t| (t.master_id.clone(), t.primary_key.clone(), t.column.clone()))
+            .collect();
+        for cell in calculated {
+            let edit = cell.edit;
+            if !expected.remove(&(
+                cell.master_id.clone(),
+                edit.primary_key.clone(),
+                edit.column.clone(),
+            )) {
+                return Err("Unexpected or duplicate Script result".into());
+            }
+            let (master, def) = get_master(&mut data, &cell.master_id)?;
+            let row = master.table.row_index(&edit.primary_key, def)?;
+            let column = column_index(&master.table, &edit.column)?;
+            master.table.rows[row][column] = crate::lf(&edit.value);
+        }
+        if !expected.is_empty() {
+            return Err("Script results are incomplete; operation was not applied".into());
+        }
+        if data != self.data {
+            self.writable(revision)?;
+        }
+        self.commit_edit(data)
+    }
+
+    fn check_script_operation(&self, operation: &Operation, revision: u64) -> Result<()> {
+        if matches!(operation, Operation::RecalculateScripts { .. }) {
+            if revision != self.revision {
+                return Err("編集状態が更新されました。もう一度操作してください。".into());
+            }
+            if self.git_status()?.merge_in_progress {
+                return Err("Merge 中は Script を再計算できません。".into());
+            }
+            // Read-only projects may evaluate scripts, but changed results still
+            // pass writable() before persistence, just like other edits.
+            Ok(())
+        } else {
+            self.writable(revision)
+        }
+    }
+
+    fn prepare(&self, operation: Operation) -> Result<PreparedEdit> {
         let mut next = self.data.clone();
+        let targets_operation = operation.clone();
         match operation {
+            Operation::RevertChange { change } => {
+                let head = self.head_data()?.ok_or("HEAD に Project がありません。")?;
+                apply_revert(&mut next, &head, &change)?;
+            }
+            Operation::SetScript {
+                master_id,
+                column,
+                script,
+            } => {
+                let (master, def) = get_master(&mut next, &master_id)?;
+                column_index(&master.table, &column)?;
+                if def.primary_key.contains(&column) {
+                    return Err("Primary Key Column に Script は設定できません。".into());
+                }
+                if let Some(script) = script {
+                    if let Some(entry) = master
+                        .scripts
+                        .columns
+                        .iter_mut()
+                        .find(|s| s.column == column)
+                    {
+                        entry.script = script;
+                    } else {
+                        master.scripts.columns.push(ColumnScript {
+                            column,
+                            script,
+                            overrides: vec![],
+                        });
+                    }
+                } else {
+                    master.scripts.columns.retain(|s| s.column != column);
+                }
+                master.scripts.validate(&master.table, def)?;
+                master.script_error = None;
+            }
+            Operation::ReplaceScripts { master_id, scripts } => {
+                if !self.safe_mode {
+                    return Err("Metadata recovery is only available in Safe Mode".into());
+                }
+                let (master, def) = get_master(&mut next, &master_id)?;
+                master.scripts = scripts;
+                master.scripts.validate(&master.table, def)?;
+                master.script_error = None;
+            }
+            Operation::RemoveOverride {
+                master_id,
+                primary_key,
+                column,
+            } => {
+                let (master, def) = get_master(&mut next, &master_id)?;
+                master.table.row_index(&primary_key, def)?;
+                let script = master
+                    .scripts
+                    .columns
+                    .iter_mut()
+                    .find(|s| s.column == column)
+                    .ok_or("Script がありません。")?;
+                if !script.overrides.contains(&primary_key) {
+                    return Err("Manual Override がありません。".into());
+                }
+                script.overrides.retain(|k| k != &primary_key);
+            }
+            Operation::RecalculateScripts { master_id } => {
+                get_master(&mut next, &master_id)?;
+            }
             Operation::SetProtectedBranches { patterns } => {
                 next.config.git.protected_branches = patterns;
                 next.config.validate()?;
@@ -420,6 +591,11 @@ impl Project {
                         &format!("gamemasterstudio/comments/{master_id}.json"),
                     )?
                     .exists()
+                    || storage::safe_path(
+                        &self.root,
+                        &format!("gamemasterstudio/scripts/{master_id}.json"),
+                    )?
+                    .exists()
                 {
                     return Err(
                         "保存先に既存ファイルがあります。別の path / ID を指定してください。"
@@ -437,6 +613,8 @@ impl Project {
                         data: Some(Master {
                             table,
                             comments: Comments::default(),
+                            scripts: Scripts::default(),
+                            script_error: None,
                         }),
                         error: None,
                     },
@@ -486,7 +664,21 @@ impl Project {
                 let mut targets = vec![];
                 let mut changes_keys = false;
                 for edit in edits {
+                    if !master.scripts.columns.is_empty() && def.primary_key.contains(&edit.column)
+                    {
+                        return Err("Script を持つ Master の Primary Key は編集できません。".into());
+                    }
                     changes_keys |= def.primary_key.contains(&edit.column);
+                    if let Some(script) = master
+                        .scripts
+                        .columns
+                        .iter_mut()
+                        .find(|s| s.column == edit.column)
+                    {
+                        if !script.overrides.contains(&edit.primary_key) {
+                            script.overrides.push(edit.primary_key.clone());
+                        }
+                    }
                     let row = *original_rows
                         .get(&edit.primary_key)
                         .ok_or_else(|| format!("Row がありません: {:?}", edit.primary_key))?;
@@ -515,6 +707,15 @@ impl Project {
             }
             Operation::CreateRows { master_id, rows } => {
                 let (master, _) = get_master(&mut next, &master_id)?;
+                let mut rows = rows;
+                for row in &mut rows {
+                    for script in &master.scripts.columns {
+                        let col = column_index(&master.table, &script.column)?;
+                        if let Some(value) = row.get_mut(col) {
+                            value.clear();
+                        }
+                    }
+                }
                 master.table.rows.extend(rows);
             }
             Operation::AddRow {
@@ -536,6 +737,9 @@ impl Project {
                 for (i, value) in master.table.key_indices(def)?.into_iter().zip(primary_key) {
                     row[i] = value;
                 }
+                for script in &master.scripts.columns {
+                    row[column_index(&master.table, &script.column)?].clear();
+                }
                 master.table.rows.push(row);
             }
             Operation::DeleteRows {
@@ -552,6 +756,9 @@ impl Project {
                     .rows
                     .retain(|r| !primary_keys.contains(&Table::key(r, &indices)));
                 master.comments.delete_rows(&primary_keys);
+                for script in &mut master.scripts.columns {
+                    script.overrides.retain(|k| !primary_keys.contains(k));
+                }
             }
             Operation::AddColumn { master_id, name } => {
                 validate_column(&name)?;
@@ -575,6 +782,7 @@ impl Project {
                     row.remove(index);
                 }
                 master.comments.cells.retain(|c| c.column != name);
+                master.scripts.columns.retain(|s| s.column != name);
             }
             Operation::SetComment {
                 master_id,
@@ -603,8 +811,22 @@ impl Project {
                 let def = &next.config.masters[id];
                 master.table.canonicalize(def)?;
                 master.comments.validate(&master.table, def)?;
+                if self.data.masters.get(id).and_then(|e| e.data.as_ref()) != Some(master)
+                    || self.data.config.masters.get(id) != Some(def)
+                {
+                    master.scripts.validate(&master.table, def)?;
+                    master.script_error = None;
+                }
             }
         }
+        let targets = crate::scripts::targets(&targets_operation, &next, self.safe_mode)?;
+        Ok(PreparedEdit {
+            data: next,
+            targets,
+        })
+    }
+
+    fn commit_edit(&mut self, next: ProjectData) -> Result<Snapshot> {
         if next != self.data {
             self.persist(&next)?;
             self.undo.push(std::mem::replace(&mut self.data, next));
@@ -793,7 +1015,7 @@ impl Project {
 
     pub(crate) fn require_clean(&self) -> Result<()> {
         let s = self.git_status()?;
-        if s.tracked_dirty || s.merge_in_progress {
+        if s.tracked_dirty || s.merge_in_progress || !self.script_changes()?.is_empty() {
             return Err(
                 "Branch / Update の前に tracked Working Tree と Index を clean にしてください。"
                     .into(),
@@ -813,11 +1035,58 @@ impl Project {
         Ok(self.snapshot())
     }
 
+    fn script_changes(&self) -> Result<Vec<String>> {
+        let mut paths = BTreeSet::new();
+        let tracked = if git(&self.root, &["rev-parse", "--verify", "HEAD"]).is_ok() {
+            git_bytes(
+                &self.root,
+                &[
+                    "diff",
+                    "--name-only",
+                    "-z",
+                    "HEAD",
+                    "--",
+                    "gamemasterstudio/scripts/",
+                ],
+            )?
+        } else {
+            git_bytes(
+                &self.root,
+                &[
+                    "diff",
+                    "--cached",
+                    "--name-only",
+                    "-z",
+                    "--",
+                    "gamemasterstudio/scripts/",
+                ],
+            )?
+        };
+        let untracked = git_bytes(
+            &self.root,
+            &[
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                "gamemasterstudio/scripts/",
+            ],
+        )?;
+        for bytes in [tracked, untracked] {
+            for path in bytes.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+                paths.insert(std::str::from_utf8(path).map_err(|e| e.to_string())?.into());
+            }
+        }
+        Ok(paths.into_iter().collect())
+    }
+
     fn managed_paths(&self) -> Result<BTreeSet<String>> {
         let mut result: BTreeSet<String> = files(&self.data)?.into_keys().collect();
         if let Some(head) = self.head_data()? {
             result.extend(files(&head)?.into_keys());
         }
+        result.extend(self.script_changes()?);
         Ok(result)
     }
 
@@ -841,7 +1110,20 @@ impl Project {
                     Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string())?,
                     Err(_) => Comments::default(),
                 };
-                Ok(Master { table, comments })
+                let mut scripts: Scripts = match git_bytes(
+                    &self.root,
+                    &["show", &format!("HEAD:gamemasterstudio/scripts/{id}.json")],
+                ) {
+                    Ok(v) => serde_json::from_slice(&v).map_err(|e| e.to_string())?,
+                    Err(_) => Scripts::default(),
+                };
+                let script_error = scripts.validate(&table, def).err();
+                Ok(Master {
+                    table,
+                    comments,
+                    scripts,
+                    script_error,
+                })
             };
             masters.insert(
                 id.clone(),
@@ -879,15 +1161,7 @@ impl Project {
     }
 
     pub fn revert_change(&mut self, change: SemanticChange, revision: u64) -> Result<Snapshot> {
-        self.writable(revision)?;
-        let head = self.head_data()?.ok_or("HEAD に Project がありません。")?;
-        let mut next = self.data.clone();
-        apply_revert(&mut next, &head, &change)?;
-        self.persist(&next)?;
-        self.undo.push(std::mem::replace(&mut self.data, next));
-        self.redo.clear();
-        self.revision += 1;
-        Ok(self.snapshot())
+        self.apply(Operation::RevertChange { change }, revision)
     }
 }
 
@@ -1174,6 +1448,7 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
                 r.remove(i);
             }
             m.comments.cells.retain(|c| c.column != *column);
+            m.scripts.columns.retain(|s| s.column != *column);
         }
         SemanticChange::DeletedColumn { master_id, column } => {
             let hm = head.masters[master_id]
@@ -1205,6 +1480,13 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
                         .unwrap_or_default(),
                 );
             }
+            if let Some(script) = hm.scripts.columns.iter().find(|s| &s.column == column) {
+                let mut script = script.clone();
+                script
+                    .overrides
+                    .retain(|key| m.table.row_index(key, d).is_ok());
+                m.scripts.columns.push(script);
+            }
         }
         SemanticChange::AddedRow {
             master_id,
@@ -1214,6 +1496,9 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
             let i = m.table.row_index(primary_key, d)?;
             m.table.rows.remove(i);
             m.comments.delete_rows(std::slice::from_ref(primary_key));
+            for script in &mut m.scripts.columns {
+                script.overrides.retain(|k| k != primary_key);
+            }
         }
         SemanticChange::DeletedRow {
             master_id,
@@ -1241,6 +1526,17 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
                 })
                 .collect();
             m.table.rows.push(row);
+            for script in &mut m.scripts.columns {
+                if hm
+                    .scripts
+                    .columns
+                    .iter()
+                    .any(|s| s.column == script.column && s.overrides.contains(primary_key))
+                    && !script.overrides.contains(primary_key)
+                {
+                    script.overrides.push(primary_key.clone());
+                }
+            }
         }
         SemanticChange::Cell {
             master_id,
@@ -1250,9 +1546,17 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
             ..
         } => {
             let (m, d) = get_master(next, master_id)?;
+            if !m.scripts.columns.is_empty() && d.primary_key.contains(column) {
+                return Err("Script を持つ Master の Primary Key は編集できません。".into());
+            }
             let r = m.table.row_index(primary_key, d)?;
             let c = column_index(&m.table, column)?;
             m.table.rows[r][c] = before.clone();
+            if let Some(script) = m.scripts.columns.iter_mut().find(|s| &s.column == column) {
+                if !script.overrides.contains(primary_key) {
+                    script.overrides.push(primary_key.clone());
+                }
+            }
         }
         SemanticChange::Comment {
             master_id, target, ..
@@ -1333,6 +1637,9 @@ fn files(data: &ProjectData) -> Result<BTreeMap<String, Vec<u8>>> {
         if let Some(master) = &entry.data {
             let def = &data.config.masters[id];
             files.insert(def.path.clone(), master.table.serialize(def)?);
+            if let Some(bytes) = master.scripts.serialize()? {
+                files.insert(format!("gamemasterstudio/scripts/{id}.json"), bytes);
+            }
             if let Some(bytes) = master.comments.serialize()? {
                 files.insert(format!("gamemasterstudio/comments/{id}.json"), bytes);
             }

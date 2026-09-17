@@ -5,6 +5,7 @@ pub mod history;
 pub mod merge;
 pub mod merge_git;
 pub mod project;
+pub mod scripts;
 pub mod storage;
 
 pub type Result<T> = std::result::Result<T, String>;

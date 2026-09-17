@@ -22,6 +22,8 @@ fn data(csv: &str) -> ProjectData {
             "enemy".into(),
             MasterEntry {
                 data: Some(Master {
+                    scripts: Default::default(),
+                    script_error: None,
                     table,
                     comments: Comments::default(),
                 }),

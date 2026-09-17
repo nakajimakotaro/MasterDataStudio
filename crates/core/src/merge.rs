@@ -345,7 +345,35 @@ pub fn merge_project(
             }
             let mut comments = merge_comments(&mut e, &id, &bc, &ac, &cc);
             comments.validate(&table, def)?;
-            Some((def.clone(), Master { table, comments }))
+            // Metadata is selected as a whole; there is no Script semantic merge.
+            let base_scripts = bm.map(|m| m.scripts.clone()).unwrap_or_default();
+            let mut scripts = if a.scripts == c.scripts || c.scripts == base_scripts {
+                a.scripts.clone()
+            } else if a.scripts == base_scripts {
+                c.scripts.clone()
+            } else {
+                return Err(format!(
+                    "{id}: Script metadata の両側変更は解決できません。"
+                ));
+            };
+            let indices = table.key_indices(def)?;
+            let keys: BTreeSet<_> = table.rows.iter().map(|r| Table::key(r, &indices)).collect();
+            scripts
+                .columns
+                .retain(|s| table.columns.contains(&s.column));
+            for s in &mut scripts.columns {
+                s.overrides.retain(|k| keys.contains(k));
+            }
+            scripts.validate(&table, def)?;
+            Some((
+                def.clone(),
+                Master {
+                    table,
+                    comments,
+                    scripts,
+                    script_error: None,
+                },
+            ))
         } else {
             let master = if bm
                 .zip(am.or(cm))
@@ -512,6 +540,9 @@ fn merge_comments(
 }
 
 fn same_master_content(a: &Master, b: &Master) -> bool {
+    if a.scripts != b.scripts {
+        return false;
+    }
     let content = |m: &Master| {
         let mut entries = BTreeMap::new();
         if let Some(c) = &m.comments.table {

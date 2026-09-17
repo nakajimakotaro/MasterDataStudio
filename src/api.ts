@@ -1,3 +1,4 @@
+import { evaluateScripts } from "./columnScripts";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   useIsMutating,
@@ -6,11 +7,11 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useUI } from "./store";
-import type { ChangeFilter, ChangeReviewData, HistoryChangesPage, HistoryPage, Operation, Resolution, SemanticChange, Snapshot } from "./types";
+import type { ChangeFilter, ChangeReviewData, HistoryChangesPage, HistoryPage, Operation, Resolution, SemanticChange, Snapshot, PreparedEdit } from "./types";
 
 export const desktop = isTauri();
 type Request =
-  | { command: "open_project"; path: string; initialize: boolean }
+  | { command: "open_project"; path: string; initialize: boolean; safeMode?: boolean }
   | { command: "edit_project"; operation: Operation }
   | { command: "undo" | "redo" | "close_project" }
   | { command: "set_identity"; name: string; email: string }
@@ -41,19 +42,41 @@ export function useRepositoryAction() {
     mutationFn: async (request: Request) => {
       const { command, ...args } = request;
       const current = client.getQueryData<Snapshot | null>(["project"]);
-      return invoke<Snapshot | null>(command, {
-        ...args,
-        revision: "revision" in request ? request.revision : current?.revision ?? 0,
-      });
+      const revision = "revision" in request ? request.revision : current?.revision ?? 0;
+      const edit = async (operation: Operation, snapshot: Snapshot) => {
+        const prepared = await invoke<PreparedEdit>("preview_edit", { operation, revision: snapshot.revision });
+        const calculated = evaluateScripts(prepared, snapshot.safeMode, operation);
+        return invoke<Snapshot>("edit_project", { operation, calculated, revision: snapshot.revision });
+      };
+      let snapshot = command === "edit_project" && current
+        ? await edit(request.operation, current)
+        : command === "revert_change" && current
+        ? await edit({ type: "revertChange", change: request.change }, current)
+        : await invoke<Snapshot | null>(command, { ...args, revision });
+      const errors: string[] = [];
+      // Undo and redo deliberately never take this path.
+      if (snapshot && !snapshot.safeMode && !snapshot.merge && [
+        "open_project", "switch_branch", "git_update", "merge_branch", "complete_merge", "abort_merge",
+      ].includes(command)) {
+        for (const [masterId, entry] of Object.entries(snapshot.data.masters)) {
+          if (entry.data?.scriptError) {
+            errors.push(`Master: ${masterId}\nScript metadata: ${entry.data.scriptError}\nSafe Mode で修正してください。`);
+          } else if (entry.data?.scripts?.columns.length) {
+            try { snapshot = await edit({ type: "recalculateScripts", masterId }, snapshot); }
+            catch (error) { errors.push(String(error)); }
+          }
+        }
+      }
+      return { snapshot, error: errors.length ? errors.join("\n\n") : null };
     },
-    onSuccess: (snapshot, request) => {
+    onSuccess: ({ snapshot, error }, request) => {
       client.setQueryData(["project"], snapshot);
       void client.invalidateQueries({ queryKey: ["changeReview"] });
       void client.invalidateQueries({ queryKey: ["history"] });
       if (snapshot?.merge || request.command === "abort_merge" || request.command === "complete_merge" || request.command === "switch_branch" || request.command === "git_update" || request.command === "merge_branch") {
         useUI.getState().selectMaster(null);
       }
-      useUI.getState().set({ error: null });
+      useUI.getState().set({ error });
       if (
         request.command === "open_project" ||
         request.command === "close_project"

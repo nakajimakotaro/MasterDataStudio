@@ -90,7 +90,20 @@ fn read_side(root: &Path, stages: &Stages, side: u8, revision: &str) -> Result<P
                     .transpose()?
                     .unwrap_or_default();
             comments.validate(&table, def)?;
-            Ok(Master { table, comments })
+            let mut scripts: crate::scripts::Scripts =
+                source_blob(root, stages, side, revision, &script_path(id))?
+                    .map(|b| {
+                        serde_json::from_slice(&b).map_err(|e| format!("{id}: Script JSON: {e}"))
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
+            scripts.validate(&table, def)?;
+            Ok(Master {
+                table,
+                comments,
+                scripts,
+                script_error: None,
+            })
         })();
         masters.insert(
             id.clone(),
@@ -108,6 +121,9 @@ fn read_side(root: &Path, stages: &Stages, side: u8, revision: &str) -> Result<P
     }
     Ok(ProjectData { config, masters })
 }
+fn script_path(id: &str) -> String {
+    format!("gamemasterstudio/scripts/{id}.json")
+}
 fn comment_path(id: &str) -> String {
     format!("gamemasterstudio/comments/{id}.json")
 }
@@ -116,6 +132,7 @@ fn paths(data: &ProjectData) -> BTreeSet<String> {
     for (id, def) in &data.config.masters {
         out.insert(def.path.clone());
         out.insert(comment_path(id));
+        out.insert(script_path(id));
     }
     out
 }
@@ -140,6 +157,14 @@ impl MergeSession {
     }
     fn load(root: &Path) -> Result<Self> {
         let stages = index_stages(root)?;
+        if let Some(path) = stages
+            .keys()
+            .find(|p| p.starts_with("gamemasterstudio/scripts/"))
+        {
+            return Err(format!(
+                "Script metadata conflict は自動解決できません: {path}"
+            ));
+        }
         let bases = git(root, &["merge-base", "--all", "HEAD", "MERGE_HEAD"])?;
         let bases: Vec<_> = bases.lines().collect();
         if bases.len() != 1 {
@@ -406,6 +431,7 @@ impl Project {
                 .ok_or("Master がありません。")?;
             outputs.insert(def.path.clone(), Some(master.table.serialize(def)?));
             outputs.insert(comment_path(id), master.comments.serialize()?);
+            outputs.insert(script_path(id), master.scripts.serialize()?);
         }
         let mut changes = vec![];
         let mut stage = BTreeSet::new();

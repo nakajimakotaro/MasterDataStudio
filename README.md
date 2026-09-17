@@ -155,3 +155,23 @@ Gitで変更を残す。**
 ## 詳しく知る
 
 [操作ガイド・技術仕様](docs/guide.md)に、編集ルール、プロジェクト設定、競合の解決方法、開発・テスト手順をまとめています。
+
+## Column Script
+
+Master の「ƒ Column Script」、または列ヘッダーの「Set Script / Edit Script」から、列ごとに JavaScript を設定できます。例えば `power` 列に次の定義を保存すると、各行の `attack` と `defense` から値を計算します。
+
+```js
+return Number(row.attack) * 2 + Number(row.defense);
+```
+
+`row` に渡されるのは同じ行の **通常列の文字列**だけです。Script 列は入力に含めず、別行・別Masterを参照するAPIはありません。戻り値は string / number / boolean を文字列に変換します。空文字は `return "";` で返してください。
+
+* 通常セルの編集・貼り付け・Fillで、その行のScript列を再計算します。Script定義の追加・変更では、その列の全行を再計算します。
+* Scriptセルは青、手動上書きしたセルは黄色で表示します。上書きしたセルは以後の再計算から除外します。セルの右クリックメニュー「Remove Override」で計算値に戻せます。
+* 行の追加・複製時はScriptを計算します。複製元のPrimary Key・Script値・Manual Override・コメントはコピーしません。Scriptを持つMasterでは、保存済み行のPrimary Keyは変更できません。
+* Scriptを削除すると現在値を維持した通常列に戻ります。計算結果・定義・Overrideは同じ操作として自動保存し、Undo / RedoではScriptを再実行せず、その操作の前後の状態を復元します。
+* CSVには計算済みの値を保存します。定義とOverrideは `gamemasterstudio/scripts/<master-id>.json` に保存し、Changes画面からCSVと一緒にCommitできます。Script metadataの競合は自動解決せず、アプリから開始したMergeを中止して元の状態へ戻します。
+
+通常モードでProjectやBranchを開くと再計算します。既存の閲覧専用ルールは維持するため、Protected BranchやGit Identity未設定の状態で計算結果に差分が出た場合は保存せずエラーを表示します。Working Branchを作成し、Identityを設定して再計算してください。
+
+Scriptは信頼できる開発者が記述するJavaScriptとしてUIスレッドで実行します。Sandbox・Worker・timeoutはありません。無限ループなどで通常起動できなくなった場合はアプリを再起動し、Launcherまたは最近のProjectの **Safe Mode** から開いてください。Safe Modeではコンパイルも実行もせず、CSVの現在値を表示したまま定義を修正・保存できます。JSONとして読める不正なmetadataはColumn Script画面で修正できます。JSON自体が壊れている場合はファイルを修正してください。修正後はProjectを閉じ、通常モードで開き直します。

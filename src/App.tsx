@@ -71,7 +71,7 @@ function Launcher() {
   const recent = useRecent();
   const action = useRepositoryAction();
   const busy = useBusy();
-  const choose = async (initialize: boolean) => {
+  const choose = async (initialize: boolean, safeMode = false) => {
     try {
       const path = await open({
         directory: true,
@@ -81,7 +81,7 @@ function Launcher() {
           : "Git Repository を開く",
       });
       if (typeof path === "string")
-        action.mutate({ command: "open_project", path, initialize });
+        action.mutate({ command: "open_project", path, initialize, safeMode });
     } catch (error) {
       useUI.getState().set({ error: String(error) });
     }
@@ -121,6 +121,7 @@ function Launcher() {
           >
             <FolderOpen size={18} /> Repository を開く <ArrowRight size={17} />
           </button>
+          <button disabled={busy || !desktop} onClick={() => void choose(false, true)}>Safe Mode で開く</button>
           <button disabled={busy || !desktop} onClick={() => void choose(true)}>
             <Plus size={18} /> Project を初期化
           </button>
@@ -143,8 +144,7 @@ function Launcher() {
           {recent.data?.length ? (
             <div className="recent-list">
               {recent.data.map((path) => (
-                <button
-                  key={path}
+                <div className="recent-project-actions" key={path}><button
                   disabled={busy}
                   onClick={() =>
                     action.mutate({
@@ -163,6 +163,7 @@ function Launcher() {
                   </span>
                   <ArrowRight size={17} />
                 </button>
+                <button disabled={busy} onClick={() => action.mutate({ command: "open_project", path, initialize: false, safeMode: true })}>Safe Mode</button></div>
               ))}
             </div>
           ) : (
@@ -221,7 +222,7 @@ function Workspace({ project }: { project: Snapshot }) {
         <button disabled={busy} onClick={() => action.mutate({ command: "git_fetch" })} title="Fetch all / prune"><RefreshCw size={15} /> Fetch</button>
         <button disabled={busy || !project.git.upstream || project.git.trackedDirty || project.git.mergeInProgress} onClick={() => action.mutate({ command: "git_update" })}>Update{project.git.behind ? ` (${project.git.behind})` : ""}</button>
         <button disabled={busy || project.git.trackedDirty || project.git.mergeInProgress || project.git.protected} onClick={() => set({ dialog: "merge" })}>Merge</button>
-        <button disabled={busy || project.git.mergeInProgress} onClick={() => set({ dialog: "changes" })}><GitCommit size={15} /> Changes <strong>{project.changes.length}</strong></button>
+        <button disabled={busy || project.git.mergeInProgress} onClick={() => set({ dialog: "changes" })}><GitCommit size={15} /> Changes <strong>{project.changes.length + (project.scriptChanges?.length ?? 0)}</strong></button>
         <span className="remote-status" title={project.git.upstream ?? "upstream 未設定"}>{project.git.upstream ?? "upstream 未設定"} · ↑ {project.git.ahead} ↓ {project.git.behind}</span>
         <button disabled={busy || project.git.mergeInProgress || (!project.git.upstream && !project.git.remotes.includes("origin"))} onClick={() => action.mutate({ command: "git_push" })}>Push</button>
         <button
@@ -300,6 +301,7 @@ function Workspace({ project }: { project: Snapshot }) {
           </button>
         </aside>
         <main className="main-panel">
+          {project.safeMode && <div className="script-mode-notice" role="status">SAFE MODE — Column Scripts are disabled · スクリプトを実行せずに開いています</div>}
           {!editable && !project.merge && (
             <div className="identity-notice">
               {project.git.protected ? "Protected Branch は閲覧専用です。Working Branch を作成してください。" : "閲覧モードです。編集するには Git の名前とメールアドレスを設定してください。"}
