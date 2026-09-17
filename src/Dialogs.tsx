@@ -6,7 +6,7 @@ import {
   type ReactNode,
 } from "react";
 import { KeyRound, X } from "lucide-react";
-import { useBusy, useRepositoryAction } from "./api";
+import { useBusy, useRepositoryAction, useRepositoryState } from "./api";
 import { History } from "./History";
 import { ChangeReview } from "./ChangeReview";
 import { useUI } from "./store";
@@ -54,7 +54,9 @@ function Modal({ title, children, className }: { title: string; children: ReactN
 export function ProjectDialogs({ project }: { project: Snapshot }) {
   const ui = useUI();
   const action = useRepositoryAction();
-  const busy = useBusy();
+  const needsGit = ["branch", "merge", "commit"].includes(ui.dialog ?? "");
+  const repository = useRepositoryState(project, needsGit);
+  const busy = useBusy() || (needsGit && repository.isFetching);
   const masterId = ui.masterId ?? "";
   const master = project.data.masters[masterId]?.data;
   const def = project.data.config.masters[masterId];
@@ -116,6 +118,15 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
       </button>
     </div>
   );
+
+  const gitReadError = repository.error ?? (ui.dialog === "commit" ? repository.data?.changesError : null);
+  if (needsGit && (repository.isPending || gitReadError)) {
+    return <Modal title="Git 状態を確認">
+      <div className="modal-body" role="status">{gitReadError
+        ? <><p className="inline-error">{String(gitReadError)}</p><button onClick={() => void repository.refetch()}>再試行</button></>
+        : "Git 状態を読み込み中…"}</div>
+    </Modal>;
+  }
 
   if (ui.dialog === "columnScript" && master) {
     const existing = master.scripts?.columns.find(s => s.column === scriptColumn);
@@ -278,7 +289,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
     </form></Modal>;
 
   if (ui.dialog === "changes")
-    return <Modal title={`Change Review · ${project.changes.length}`} className="review-modal"><ChangeReview project={project} /></Modal>;
+    return <Modal title={project.gitStale ? "Change Review" : `Change Review · ${project.changes.length}`} className="review-modal"><ChangeReview project={project} /></Modal>;
 
   if (ui.dialog === "commit")
     return <Modal title="Commit"><form onSubmit={submit(()=>{void action.mutateAsync({command:"commit",message,push:false}).then(()=>ui.set({dialog:null})).catch(()=>{});})}>

@@ -25,6 +25,7 @@ export type Master = {
 };
 export type Definition = { path: string; primaryKey: string[] };
 export type Snapshot = {
+  gitStale?: boolean;
   safeMode?: boolean;
   scriptChanges?: string[];
   root: string;
@@ -46,7 +47,20 @@ export type Snapshot = {
     masters: Record<string, { data: Master | null; error: string | null }>;
   };
 };
+export type MasterUpdate =
+  | { kind: "replace"; entry: Snapshot["data"]["masters"][string] }
+  | { kind: "rows"; rows: [number, string[]][]; rowCount: number; comments: Comments; scripts: Scripts; scriptError: string | null; error: string | null };
+export type ProjectUpdate = Pick<Snapshot, "root" | "revision" | "canUndo" | "canRedo"> & {
+  branch: string;
+  protected: boolean;
+  data: {
+    baseRevision: number;
+    config: Snapshot["data"]["config"];
+    masters: Record<string, MasterUpdate | null>;
+  };
+};
 export type GitStatus = { branch: string; upstream: string | null; ahead: number; behind: number; protected: boolean; trackedDirty: boolean; mergeInProgress: boolean; remotes: string[]; branches: string[] };
+export type RepositoryState = Pick<Snapshot, "root" | "revision" | "git" | "changes" | "scriptChanges" | "changesError">;
 export type SemanticChange =
   | { kind: "projectConfig"; masterId: string; before: { protectedBranches: string[] } | null; after: { protectedBranches: string[] } }
   | { kind: "masterDefinition"; masterId: string; before: Definition; after: Definition }
@@ -124,7 +138,7 @@ export type MergeView = {
   error: string | null;
 };
 
-export type ChangeReviewData = { before: Snapshot["data"] | null; after: Snapshot["data"]; changes: SemanticChange[] };
+export type ChangeReviewData = Omit<RepositoryState, "changesError"> & { before: Snapshot["data"] | null; after: Snapshot["data"] };
 
 export type HistoryCommit = { oid: string; parents: string[]; author: Identity; authoredAt: string; subject: string };
 export type HistoryPage = { head: string | null; commits: HistoryCommit[]; hasMore: boolean; nextCursor: string | null };

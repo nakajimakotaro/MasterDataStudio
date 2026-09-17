@@ -40,10 +40,10 @@ export function ChangeReview({ project }: { project: Snapshot }) {
     {review.isPending && <div className="review-message" role="status">変更前後のデータを読み込み中…</div>}
     {review.error && <div className="review-message inline-error" role="alert">差分を読み込めません: {String(review.error)} <button disabled={busy} onClick={() => void review.refetch()}>再試行</button></div>}
     {review.data && !review.error && <ReviewContent key={project.root} data={review.data} initialMaster={ui.masterId} disabled={busy || !editable || review.isFetching} />}
-    {!!project.scriptChanges?.length && <div className="review-message"><strong>Script metadata の変更（Commit 対象）</strong><ul>{project.scriptChanges.map(path => <li key={path}><code>{path}</code></li>)}</ul></div>}
+    {!!review.data?.scriptChanges?.length && <div className="review-message"><strong>Script metadata の変更（Commit 対象）</strong><ul>{review.data.scriptChanges.map(path => <li key={path}><code>{path}</code></li>)}</ul></div>}
     <div className="modal-footer">
       <button disabled={busy} onClick={() => ui.set({ dialog: null })}>閉じる</button>
-      <button className="primary" disabled={busy || !editable || (!review.data?.changes.length && !project.scriptChanges?.length) || review.isFetching || !!review.error || !!project.changesError} onClick={() => ui.set({ dialog: "commit" })}>Commit へ</button>
+      <button className="primary" disabled={busy || !editable || (!review.data?.changes.length && !review.data?.scriptChanges?.length) || review.isFetching || !!review.error} onClick={() => ui.set({ dialog: "commit" })}>Commit へ</button>
     </div>
   </>;
 }

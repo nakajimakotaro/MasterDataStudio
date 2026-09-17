@@ -1,4 +1,5 @@
 import { evaluateScripts } from "./columnScripts";
+import { applyProjectUpdate, applyRepositoryState } from "./projectUpdate";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   useIsMutating,
@@ -7,7 +8,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useUI } from "./store";
-import type { ChangeFilter, ChangeReviewData, HistoryChangesPage, HistoryPage, Operation, Resolution, SemanticChange, Snapshot, PreparedEdit } from "./types";
+import type { ChangeFilter, ChangeReviewData, HistoryChangesPage, HistoryPage, Operation, Resolution, SemanticChange, Snapshot, PreparedEdit, ProjectUpdate, RepositoryState } from "./types";
 
 export const desktop = isTauri();
 type Request =
@@ -39,19 +40,33 @@ export function useRepositoryAction() {
   return useMutation({
     mutationKey: ["repository"],
     scope: { id: "repository" },
+    onMutate: async () => {
+      // A read started before a Git operation must not overwrite its result,
+      // even when that operation (for example Fetch) keeps the same revision.
+      await Promise.all([
+        client.cancelQueries({ queryKey: ["changeReview"] }),
+        client.cancelQueries({ queryKey: ["repositoryState"] }),
+      ]);
+    },
     mutationFn: async (request: Request) => {
       const { command, ...args } = request;
       const current = client.getQueryData<Snapshot | null>(["project"]);
+      if (["edit_project", "revert_change", "undo", "redo"].includes(command) && !current) {
+        throw new Error("Repository を開いてください。");
+      }
       const revision = "revision" in request ? request.revision : current?.revision ?? 0;
       const edit = async (operation: Operation, snapshot: Snapshot) => {
         const prepared = await invoke<PreparedEdit>("preview_edit", { operation, revision: snapshot.revision });
         const calculated = evaluateScripts(prepared, snapshot.safeMode, operation);
-        return invoke<Snapshot>("edit_project", { operation, calculated, revision: snapshot.revision });
+        const update = await invoke<ProjectUpdate>("edit_project", { operation, calculated, revision: snapshot.revision });
+        return applyProjectUpdate(snapshot, update);
       };
       let snapshot = command === "edit_project" && current
         ? await edit(request.operation, current)
         : command === "revert_change" && current
         ? await edit({ type: "revertChange", change: request.change }, current)
+        : (command === "undo" || command === "redo") && current
+        ? applyProjectUpdate(current, await invoke<ProjectUpdate>(command, { revision }))
         : await invoke<Snapshot | null>(command, { ...args, revision });
       const errors: string[] = [];
       // Undo and redo deliberately never take this path.
@@ -71,8 +86,9 @@ export function useRepositoryAction() {
     },
     onSuccess: ({ snapshot, error }, request) => {
       client.setQueryData(["project"], snapshot);
-      void client.invalidateQueries({ queryKey: ["changeReview"] });
-      void client.invalidateQueries({ queryKey: ["history"] });
+      if (!["edit_project", "revert_change", "undo", "redo"].includes(request.command)) {
+        void client.invalidateQueries({ queryKey: ["history"] });
+      }
       if (snapshot?.merge || request.command === "abort_merge" || request.command === "complete_merge" || request.command === "switch_branch" || request.command === "git_update" || request.command === "merge_branch") {
         useUI.getState().selectMaster(null);
       }
@@ -92,6 +108,11 @@ export function useRepositoryAction() {
       if (request.command !== "open_project" && request.command !== "close_project") {
         try { client.setQueryData(["project"], await invoke<Snapshot>("get_project")); } catch { /* Preserve the original error. */ }
       }
+    },
+    onSettled: () => {
+      // Only mounted, enabled review/Git dialogs refetch; cell editors do not.
+      void client.invalidateQueries({ queryKey: ["changeReview"] });
+      void client.invalidateQueries({ queryKey: ["repositoryState"] });
     },
   });
 }
@@ -125,10 +146,34 @@ export function useHistoryDetail(root: string, oid: string | null, filter: Chang
 }
 
 export function useChangeReview(project: Snapshot) {
+  const client = useQueryClient();
   return useQuery({
-    queryKey: ["changeReview", project.root, project.revision, project.git.branch],
-    queryFn: () => invoke<ChangeReviewData>("change_review", { root: project.root, revision: project.revision }),
+    queryKey: ["changeReview", project.root, project.revision],
+    queryFn: async ({ signal }) => {
+      const review = await invoke<ChangeReviewData>("change_review", { root: project.root, revision: project.revision });
+      if (!signal.aborted && !client.isMutating({ mutationKey: ["repository"] })) {
+        client.setQueryData<Snapshot | null>(["project"], current => applyRepositoryState(current, { ...review, changesError: null }));
+      }
+      return review;
+    },
     placeholderData: (previous, query) => query?.queryKey[1] === project.root ? previous : undefined,
     gcTime: 0,
+  });
+}
+
+export function useRepositoryState(project: Snapshot, enabled: boolean) {
+  const client = useQueryClient();
+  return useQuery({
+    queryKey: ["repositoryState", project.root, project.revision],
+    queryFn: async ({ signal }) => {
+      const state = await invoke<RepositoryState>("repository_state", { root: project.root, revision: project.revision });
+      if (!signal.aborted && !client.isMutating({ mutationKey: ["repository"] })) {
+        client.setQueryData<Snapshot | null>(["project"], current => applyRepositoryState(current, state));
+      }
+      return state;
+    },
+    enabled,
+    gcTime: 0,
+    refetchOnMount: "always",
   });
 }

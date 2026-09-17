@@ -220,9 +220,9 @@ function Workspace({ project }: { project: Snapshot }) {
           {project.git.protected && <small>PROTECTED</small>}
         </button>
         <button disabled={busy} onClick={() => action.mutate({ command: "git_fetch" })} title="Fetch all / prune"><RefreshCw size={15} /> Fetch</button>
-        <button disabled={busy || !project.git.upstream || project.git.trackedDirty || project.git.mergeInProgress} onClick={() => action.mutate({ command: "git_update" })}>Update{project.git.behind ? ` (${project.git.behind})` : ""}</button>
-        <button disabled={busy || project.git.trackedDirty || project.git.mergeInProgress || project.git.protected} onClick={() => set({ dialog: "merge" })}>Merge</button>
-        <button disabled={busy || project.git.mergeInProgress} onClick={() => set({ dialog: "changes" })}><GitCommit size={15} /> Changes <strong>{project.changes.length + (project.scriptChanges?.length ?? 0)}</strong></button>
+        <button disabled={busy || !project.git.upstream || (!project.gitStale && project.git.trackedDirty) || project.git.mergeInProgress} onClick={() => action.mutate({ command: "git_update" })}>Update{project.git.behind ? ` (${project.git.behind})` : ""}</button>
+        <button disabled={busy || (!project.gitStale && project.git.trackedDirty) || project.git.mergeInProgress || project.git.protected} onClick={() => set({ dialog: "merge" })}>Merge</button>
+        <button disabled={busy || project.git.mergeInProgress} onClick={() => set({ dialog: "changes" })}><GitCommit size={15} /> Changes {!project.gitStale && <strong>{project.changes.length + (project.scriptChanges?.length ?? 0)}</strong>}</button>
         <span className="remote-status" title={project.git.upstream ?? "upstream 未設定"}>{project.git.upstream ?? "upstream 未設定"} · ↑ {project.git.ahead} ↓ {project.git.behind}</span>
         <button disabled={busy || project.git.mergeInProgress || (!project.git.upstream && !project.git.remotes.includes("origin"))} onClick={() => action.mutate({ command: "git_push" })}>Push</button>
         <button
@@ -434,7 +434,7 @@ function Dashboard({ project }: { project: Snapshot }) {
                 {entry.data?.table.rows.length.toLocaleString() ?? "—"}
               </span>
               <span className={`badge ${entry.error ? "danger" : ""}`}>
-                {entry.error ? "読み込みエラー" : project.changes.some(c => c.masterId === id) ? "Modified" : "Ready"}
+                {entry.error ? "読み込みエラー" : project.gitStale ? "保存済み" : project.changes.some(c => c.masterId === id) ? "Modified" : "Ready"}
                 <ArrowRight size={14} />
               </span>
             </button>

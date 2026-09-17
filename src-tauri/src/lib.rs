@@ -1,5 +1,5 @@
 use gamemasterstudio_core::{
-    project::{Operation, Project, Snapshot},
+    project::{Operation, Project, ProjectUpdate, RepositoryState, Snapshot},
     storage,
 };
 use serde::{Deserialize, Serialize};
@@ -81,10 +81,10 @@ fn close_project(state: State<AppState>) -> Result<(), String> {
 }
 
 // Repository work and waits for this lock run off the UI thread.
-fn with_project(
+fn with_project<T>(
     state: State<AppState>,
-    f: impl FnOnce(&mut Project) -> Result<Snapshot, String>,
-) -> Result<Snapshot, String> {
+    f: impl FnOnce(&mut Project) -> Result<T, String>,
+) -> Result<T, String> {
     let mut state = state.0.lock().map_err(|e| e.to_string())?;
     f(state.as_mut().ok_or("Repository を開いてください。")?)
 }
@@ -95,14 +95,29 @@ fn get_project(state: State<AppState>) -> Result<Snapshot, String> {
 }
 
 #[tauri::command(async)]
+fn repository_state(
+    root: String,
+    revision: u64,
+    state: State<AppState>,
+) -> Result<RepositoryState, String> {
+    with_project(state, |p| {
+        let result = p.repository_state()?;
+        if result.root != root || result.revision != revision {
+            return Err("編集状態が更新されました。もう一度操作してください。".into());
+        }
+        Ok(result)
+    })
+}
+
+#[tauri::command(async)]
 fn edit_project(
     operation: Operation,
     calculated: Option<Vec<gamemasterstudio_core::scripts::CalculatedCell>>,
     revision: u64,
     state: State<AppState>,
-) -> Result<Snapshot, String> {
+) -> Result<ProjectUpdate, String> {
     with_project(state, |p| {
-        p.apply_calculated(operation, calculated.unwrap_or_default(), revision)
+        p.apply_calculated_update(operation, calculated.unwrap_or_default(), revision)
     })
 }
 
@@ -116,17 +131,17 @@ fn preview_edit(
     current
         .as_ref()
         .ok_or("Repository を開いてください。")?
-        .preview(operation, revision)
+        .preview_scripts(operation, revision)
 }
 
 #[tauri::command(async)]
-fn undo(revision: u64, state: State<AppState>) -> Result<Snapshot, String> {
-    with_project(state, |p| p.undo(revision))
+fn undo(revision: u64, state: State<AppState>) -> Result<ProjectUpdate, String> {
+    with_project(state, |p| p.undo_update(revision))
 }
 
 #[tauri::command(async)]
-fn redo(revision: u64, state: State<AppState>) -> Result<Snapshot, String> {
-    with_project(state, |p| p.redo(revision))
+fn redo(revision: u64, state: State<AppState>) -> Result<ProjectUpdate, String> {
+    with_project(state, |p| p.redo_update(revision))
 }
 
 #[tauri::command(async)]
@@ -279,7 +294,8 @@ pub fn run() {
             abort_merge,
             project_history,
             history_detail,
-            change_review
+            change_review,
+            repository_state
         ])
         .run(tauri::generate_context!())
         .expect("GameMasterStudio could not start");

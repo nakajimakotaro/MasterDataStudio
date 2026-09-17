@@ -36,11 +36,95 @@ pub struct ProjectData {
     pub masters: BTreeMap<String, MasterEntry>,
 }
 
+/// Changes to masters only; null removes a master from the cache.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectDelta {
+    pub base_revision: u64,
+    pub config: ProjectConfig,
+    pub masters: BTreeMap<String, Option<MasterUpdate>>,
+}
+
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectUpdate {
+    pub root: String,
+    pub revision: u64,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub branch: String,
+    pub protected: bool,
+    pub data: ProjectDelta,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepositoryState {
+    pub root: String,
+    pub revision: u64,
+    pub git: GitStatus,
+    pub changes: Vec<SemanticChange>,
+    pub script_changes: Vec<String>,
+    pub changes_error: Option<String>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum MasterUpdate {
+    Replace {
+        entry: MasterEntry,
+    },
+    Rows {
+        rows: Vec<(usize, Vec<String>)>,
+        row_count: usize,
+        comments: Comments,
+        scripts: Scripts,
+        script_error: Option<String>,
+        error: Option<String>,
+    },
+}
+
+impl MasterUpdate {
+    fn between(before: Option<&MasterEntry>, after: &MasterEntry) -> Self {
+        if let (Some(before), Some(master)) = (before.and_then(|e| e.data.as_ref()), &after.data) {
+            if before.table.columns == master.table.columns {
+                return Self::Rows {
+                    rows: master
+                        .table
+                        .rows
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, row)| before.table.rows.get(*i) != Some(*row))
+                        .map(|(i, row)| (i, row.clone()))
+                        .collect(),
+                    row_count: master.table.rows.len(),
+                    comments: master.comments.clone(),
+                    scripts: master.scripts.clone(),
+                    script_error: master.script_error.clone(),
+                    error: after.error.clone(),
+                };
+            }
+        }
+        Self::Replace {
+            entry: after.clone(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChangeReview {
     pub before: Option<ProjectData>,
     pub after: ProjectData,
     pub changes: Vec<SemanticChange>,
+    pub root: String,
+    pub revision: u64,
+    pub git: GitStatus,
+    pub script_changes: Vec<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -360,6 +444,18 @@ impl Project {
         Self::open(&root)
     }
 
+    pub fn repository_state(&self) -> Result<RepositoryState> {
+        let changes = self.semantic_diff();
+        Ok(RepositoryState {
+            root: self.root.to_string_lossy().into_owned(),
+            revision: self.revision,
+            git: self.git_status()?,
+            changes_error: changes.as_ref().err().cloned(),
+            changes: changes.unwrap_or_default(),
+            script_changes: self.script_changes()?,
+        })
+    }
+
     pub fn snapshot(&self) -> Snapshot {
         let git = self.git_status().unwrap_or_default();
         let changes = self.semantic_diff();
@@ -408,7 +504,7 @@ impl Project {
         Ok(self.snapshot())
     }
 
-    fn writable(&self, revision: u64) -> Result<()> {
+    fn writable(&self, revision: u64) -> Result<String> {
         if revision != self.revision {
             return Err("編集状態が更新されました。もう一度操作してください。".into());
         }
@@ -417,20 +513,62 @@ impl Project {
                 "編集するには Project Settings で Git Identity を設定してください。".into(),
             );
         }
-        if self.git_status()?.merge_in_progress {
+        if git(&self.root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_ok() {
             return Err("Merge 中は Conflict Resolver で解決してください。".into());
         }
-        if self.git_status()?.protected {
+        let branch = git(&self.root, &["branch", "--show-current"])?;
+        if self
+            .data
+            .config
+            .git
+            .protected_branches
+            .iter()
+            .any(|p| glob_matches(p, &branch))
+        {
             return Err(
                 "Protected Branch では編集できません。Working Branch を作成してください。".into(),
             );
         }
-        Ok(())
+        Ok(branch)
     }
 
     pub fn preview(&self, operation: Operation, revision: u64) -> Result<PreparedEdit> {
         self.check_script_operation(&operation, revision)?;
         self.prepare(operation)
+    }
+
+    /// JavaScript receives only the rows needed by the backend-selected targets.
+    pub fn preview_scripts(&self, operation: Operation, revision: u64) -> Result<PreparedEdit> {
+        let mut prepared = self.preview(operation, revision)?;
+        let mut keys: BTreeMap<String, BTreeSet<PrimaryKey>> = BTreeMap::new();
+        for target in &prepared.targets {
+            keys.entry(target.master_id.clone())
+                .or_default()
+                .insert(target.primary_key.clone());
+        }
+        prepared.data.masters.retain(|id, _| keys.contains_key(id));
+        prepared
+            .data
+            .config
+            .masters
+            .retain(|id, _| keys.contains_key(id));
+        for (id, entry) in &mut prepared.data.masters {
+            if let Some(master) = &mut entry.data {
+                let indices = master
+                    .table
+                    .key_indices(&prepared.data.config.masters[id])?;
+                master
+                    .table
+                    .rows
+                    .retain(|row| keys[id].contains(&Table::key(row, &indices)));
+                // Evaluation uses script definitions and ordinary cell values only.
+                master.comments = Comments::default();
+                for script in &mut master.scripts.columns {
+                    script.overrides.clear();
+                }
+            }
+        }
+        Ok(prepared)
     }
 
     pub fn apply(&mut self, operation: Operation, revision: u64) -> Result<Snapshot> {
@@ -443,7 +581,71 @@ impl Project {
         calculated: Vec<CalculatedCell>,
         revision: u64,
     ) -> Result<Snapshot> {
-        self.check_script_operation(&operation, revision)?;
+        let (data, _) = self.calculate_edit(operation, calculated, revision)?;
+        self.commit_edit(data)?;
+        Ok(self.snapshot())
+    }
+
+    pub fn apply_calculated_update(
+        &mut self,
+        operation: Operation,
+        calculated: Vec<CalculatedCell>,
+        revision: u64,
+    ) -> Result<ProjectUpdate> {
+        let (data, branch) = self.calculate_edit(operation, calculated, revision)?;
+        let delta = self.data_delta(&data, revision);
+        self.commit_edit(data)?;
+        Ok(self.edit_update(delta, branch))
+    }
+
+    fn data_delta(&self, data: &ProjectData, revision: u64) -> ProjectDelta {
+        let mut masters = BTreeMap::new();
+        for (id, entry) in &data.masters {
+            if self.data.masters.get(id) != Some(entry) {
+                masters.insert(
+                    id.clone(),
+                    Some(MasterUpdate::between(self.data.masters.get(id), entry)),
+                );
+            }
+        }
+        for id in self.data.masters.keys() {
+            if !data.masters.contains_key(id) {
+                masters.insert(id.clone(), None);
+            }
+        }
+        ProjectDelta {
+            base_revision: revision,
+            config: data.config.clone(),
+            masters,
+        }
+    }
+
+    // No Git status, HEAD reads or semantic diff on the ordinary edit path.
+    fn edit_update(&self, data: ProjectDelta, branch: String) -> ProjectUpdate {
+        ProjectUpdate {
+            root: self.root.to_string_lossy().into_owned(),
+            revision: self.revision,
+            can_undo: !self.undo.is_empty(),
+            can_redo: !self.redo.is_empty(),
+            protected: self
+                .data
+                .config
+                .git
+                .protected_branches
+                .iter()
+                .any(|p| glob_matches(p, &branch)),
+            branch,
+            data,
+        }
+    }
+
+    fn calculate_edit(
+        &self,
+        operation: Operation,
+        calculated: Vec<CalculatedCell>,
+        revision: u64,
+    ) -> Result<(ProjectData, String)> {
+        let mut branch = self.check_script_operation(&operation, revision)?;
         let PreparedEdit { mut data, targets } = self.prepare(operation)?;
         let mut expected: BTreeSet<_> = targets
             .iter()
@@ -467,22 +669,22 @@ impl Project {
             return Err("Script results are incomplete; operation was not applied".into());
         }
         if data != self.data {
-            self.writable(revision)?;
+            branch = self.writable(revision)?;
         }
-        self.commit_edit(data)
+        Ok((data, branch))
     }
 
-    fn check_script_operation(&self, operation: &Operation, revision: u64) -> Result<()> {
+    fn check_script_operation(&self, operation: &Operation, revision: u64) -> Result<String> {
         if matches!(operation, Operation::RecalculateScripts { .. }) {
             if revision != self.revision {
                 return Err("編集状態が更新されました。もう一度操作してください。".into());
             }
-            if self.git_status()?.merge_in_progress {
+            if git(&self.root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"]).is_ok() {
                 return Err("Merge 中は Script を再計算できません。".into());
             }
             // Read-only projects may evaluate scripts, but changed results still
             // pass writable() before persistence, just like other edits.
-            Ok(())
+            git(&self.root, &["branch", "--show-current"])
         } else {
             self.writable(revision)
         }
@@ -807,6 +1009,11 @@ impl Project {
             }
         }
         for (id, entry) in &mut next.masters {
+            if self.data.masters.get(id) == Some(entry)
+                && self.data.config.masters.get(id) == next.config.masters.get(id)
+            {
+                continue;
+            }
             if let Some(master) = &mut entry.data {
                 let def = &next.config.masters[id];
                 master.table.canonicalize(def)?;
@@ -826,7 +1033,7 @@ impl Project {
         })
     }
 
-    fn commit_edit(&mut self, next: ProjectData) -> Result<Snapshot> {
+    fn commit_edit(&mut self, next: ProjectData) -> Result<()> {
         if next != self.data {
             self.persist(&next)?;
             self.undo.push(std::mem::replace(&mut self.data, next));
@@ -836,34 +1043,50 @@ impl Project {
             self.redo.clear();
             self.revision += 1;
         }
-        Ok(self.snapshot())
+        Ok(())
     }
 
     pub fn undo(&mut self, revision: u64) -> Result<Snapshot> {
-        self.writable(revision)?;
+        self.undo_update(revision)?;
+        Ok(self.snapshot())
+    }
+
+    pub fn undo_update(&mut self, revision: u64) -> Result<ProjectUpdate> {
+        let branch = self.writable(revision)?;
+        let delta = self.data_delta(self.undo.last().unwrap_or(&self.data), revision);
         if let Some(next) = self.undo.last().cloned() {
             self.persist(&next)?;
             self.undo.pop();
             self.redo.push(std::mem::replace(&mut self.data, next));
             self.revision += 1;
         }
-        Ok(self.snapshot())
+        Ok(self.edit_update(delta, branch))
     }
 
     pub fn redo(&mut self, revision: u64) -> Result<Snapshot> {
-        self.writable(revision)?;
+        self.redo_update(revision)?;
+        Ok(self.snapshot())
+    }
+
+    pub fn redo_update(&mut self, revision: u64) -> Result<ProjectUpdate> {
+        let branch = self.writable(revision)?;
+        let delta = self.data_delta(self.redo.last().unwrap_or(&self.data), revision);
         if let Some(next) = self.redo.last().cloned() {
             self.persist(&next)?;
             self.redo.pop();
             self.undo.push(std::mem::replace(&mut self.data, next));
             self.revision += 1;
         }
-        Ok(self.snapshot())
+        Ok(self.edit_update(delta, branch))
     }
 
     fn persist(&self, next: &ProjectData) -> Result<()> {
-        let old_files = files(&self.data)?;
-        let next_files = files(next)?;
+        let changed = |id: &str| {
+            self.data.masters.get(id) != next.masters.get(id)
+                || self.data.config.masters.get(id) != next.config.masters.get(id)
+        };
+        let old_files = files_where(&self.data, changed)?;
+        let next_files = files_where(next, changed)?;
         let paths: BTreeSet<_> = old_files.keys().chain(next_files.keys()).collect();
         let mut changes = vec![];
         for relative in paths {
@@ -1157,6 +1380,10 @@ impl Project {
             before,
             after: self.data.clone(),
             changes,
+            root: self.root.to_string_lossy().into_owned(),
+            revision: self.revision,
+            git: self.git_status()?,
+            script_changes: self.script_changes()?,
         })
     }
 
@@ -1632,8 +1859,18 @@ fn column_index(table: &Table, column: &str) -> Result<usize> {
 }
 
 fn files(data: &ProjectData) -> Result<BTreeMap<String, Vec<u8>>> {
+    files_where(data, |_| true)
+}
+
+fn files_where(
+    data: &ProjectData,
+    include: impl Fn(&str) -> bool,
+) -> Result<BTreeMap<String, Vec<u8>>> {
     let mut files = BTreeMap::from([(CONFIG_PATH.into(), data.config.serialize()?)]);
     for (id, entry) in &data.masters {
+        if !include(id) {
+            continue;
+        }
         if let Some(master) = &entry.data {
             let def = &data.config.masters[id];
             files.insert(def.path.clone(), master.table.serialize(def)?);
