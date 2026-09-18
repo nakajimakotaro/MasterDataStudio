@@ -14,7 +14,7 @@ export const desktop = isTauri();
 type Request =
   | { command: "open_project"; path: string; initialize: boolean; safeMode?: boolean }
   | { command: "edit_project"; operation: Operation }
-  | { command: "undo" | "redo" | "close_project" }
+  | { command: "close_project" }
   | { command: "set_identity"; name: string; email: string }
   | { command: "git_fetch" | "git_update" | "git_push" }
   | { command: "switch_branch"; branch: string; create: boolean }
@@ -51,7 +51,7 @@ export function useRepositoryAction() {
     mutationFn: async (request: Request) => {
       const { command, ...args } = request;
       const current = client.getQueryData<Snapshot | null>(["project"]);
-      if (["edit_project", "revert_change", "undo", "redo"].includes(command) && !current) {
+      if (["edit_project", "revert_change"].includes(command) && !current) {
         throw new Error("Repository を開いてください。");
       }
       const revision = "revision" in request ? request.revision : current?.revision ?? 0;
@@ -65,11 +65,8 @@ export function useRepositoryAction() {
         ? await edit(request.operation, current)
         : command === "revert_change" && current
         ? await edit({ type: "revertChange", change: request.change }, current)
-        : (command === "undo" || command === "redo") && current
-        ? applyProjectUpdate(current, await invoke<ProjectUpdate>(command, { revision }))
         : await invoke<Snapshot | null>(command, { ...args, revision });
       const errors: string[] = [];
-      // Undo and redo deliberately never take this path.
       if (snapshot && !snapshot.safeMode && !snapshot.merge && [
         "open_project", "switch_branch", "git_update", "merge_branch", "complete_merge", "abort_merge",
       ].includes(command)) {
@@ -86,7 +83,7 @@ export function useRepositoryAction() {
     },
     onSuccess: ({ snapshot, error }, request) => {
       client.setQueryData(["project"], snapshot);
-      if (!["edit_project", "revert_change", "undo", "redo"].includes(request.command)) {
+      if (!["edit_project", "revert_change"].includes(request.command)) {
         void client.invalidateQueries({ queryKey: ["history"] });
       }
       if (snapshot?.merge || request.command === "abort_merge" || request.command === "complete_merge" || request.command === "switch_branch" || request.command === "git_update" || request.command === "merge_branch") {

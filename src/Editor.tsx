@@ -15,11 +15,9 @@ import {
   PanelRightClose,
   PanelRightOpen,
   Plus,
-  Redo2,
   Search,
   Settings2,
   Trash2,
-  Undo2,
 } from "lucide-react";
 import { masterColumn, masterGridTheme } from "./MasterGrid";
 import { CellEditBatch } from "./cellEditBatch";
@@ -354,30 +352,6 @@ export function Editor({
     state.set({ selectedKeys, cell });
   }, [rowData, master.table.columns]);
 
-  useEffect(() => {
-    const keydown = (event: KeyboardEvent) => {
-      if (
-        !(event.metaKey || event.ctrlKey) ||
-        event.key.toLowerCase() !== "z" ||
-        event.altKey
-      )
-        return;
-      if (
-        (event.target as HTMLElement)?.closest(
-          'input, textarea, [contenteditable="true"], dialog',
-        )
-      )
-        return;
-      event.preventDefault();
-      if (!editable) return;
-      const command = event.shiftKey ? "redo" : "undo";
-      if (command === "undo" ? project.canUndo : project.canRedo)
-        action.mutate({ command });
-    };
-    document.addEventListener("keydown", keydown);
-    return () => document.removeEventListener("keydown", keydown);
-  }, [editable, project.canUndo, project.canRedo, action]);
-
   return (
     <div className="editor">
       <div className="editor-heading">
@@ -459,24 +433,6 @@ export function Editor({
         <div className="toolbar-group">
           <button disabled={busy || (!master.table.columns.some(c => !def.primaryKey.includes(c)) && !(project.safeMode && master.scriptError))} onClick={() => ui.set({ dialog: "columnScript", scriptColumn: null })}>ƒ Column Script</button>
           <button disabled={!editable || project.safeMode || !master.scripts?.columns.length || !!master.scriptError} title="Manual Override を維持して全 Script を再計算" onClick={() => action.mutate({ command: "edit_project", operation: { type: "recalculateScripts", masterId } })}>再計算</button>
-        </div>
-        <div className="toolbar-group">
-          <button
-            disabled={!editable || !project.canUndo}
-            title="Undo · ⌘/Ctrl Z"
-            aria-label="Undo"
-            onClick={() => action.mutate({ command: "undo" })}
-          >
-            <Undo2 size={17} />
-          </button>
-          <button
-            disabled={!editable || !project.canRedo}
-            title="Redo · ⌘/Ctrl Shift Z"
-            aria-label="Redo"
-            onClick={() => action.mutate({ command: "redo" })}
-          >
-            <Redo2 size={17} />
-          </button>
         </div>
         <div className="toolbar-group">
           <button

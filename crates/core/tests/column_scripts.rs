@@ -81,7 +81,7 @@ fn fixture() -> (tempfile::TempDir, Project) {
 }
 
 #[test]
-fn preparation_results_and_history_are_one_atomic_operation() {
+fn preparation_and_results_are_one_atomic_operation() {
     let (dir, mut p) = fixture();
     let revision = p.snapshot().revision;
     let initial = master(&p);
@@ -119,25 +119,16 @@ fn preparation_results_and_history_are_one_atomic_operation() {
     apply(&mut p, op);
     let calculated = master(&p);
     assert_eq!(calculated.table.rows[0][3], "40");
-    p.undo(p.snapshot().revision).unwrap();
-    assert_eq!(master(&p), initial);
-    assert!(!dir
-        .path()
-        .join("gamemasterstudio/scripts/enemy.json")
-        .exists());
-    p.redo(p.snapshot().revision).unwrap();
-    assert_eq!(master(&p), calculated);
     assert!(p
         .preview(set_script("power", Some("return 0;")), revision)
         .is_err());
 }
 
 #[test]
-fn mixed_paste_overrides_and_recalculation_share_undo() {
+fn mixed_paste_preserves_overrides_and_recalculates() {
     let (_dir, mut p) = fixture();
     apply(&mut p, set_script("power", Some("return 0;")));
     apply(&mut p, set_script("score", Some("return 0;")));
-    let before = master(&p);
     let op = Operation::EditCells {
         master_id: "enemy".into(),
         edits: vec![
@@ -158,11 +149,6 @@ fn mixed_paste_overrides_and_recalculation_share_undo() {
         master(&p).scripts.columns[0].overrides,
         vec![strings(&["1", "a"])]
     );
-    let after = master(&p);
-    p.undo(p.snapshot().revision).unwrap();
-    assert_eq!(master(&p), before);
-    p.redo(p.snapshot().revision).unwrap();
-    assert_eq!(master(&p), after);
     apply(&mut p, set_script("power", Some("return 9;")));
     assert_eq!(master(&p).table.rows[0][3], "777");
     apply(
@@ -251,8 +237,6 @@ fn create_duplicate_delete_and_remove_script_preserve_metadata_rules() {
         },
     );
     assert!(master(&p).scripts.columns[0].overrides.is_empty());
-    p.undo(p.snapshot().revision).unwrap();
-    assert_eq!(master(&p).scripts.columns[0].overrides.len(), 1);
     let table = master(&p).table;
     apply(&mut p, set_script("power", None));
     assert_eq!(master(&p).table, table);
@@ -260,7 +244,7 @@ fn create_duplicate_delete_and_remove_script_preserve_metadata_rules() {
         .path()
         .join("gamemasterstudio/scripts/enemy.json")
         .exists());
-    p.undo(p.snapshot().revision).unwrap();
+    apply(&mut p, set_script("power", Some("return 0;")));
     apply(
         &mut p,
         Operation::DeleteColumn {
@@ -273,8 +257,6 @@ fn create_duplicate_delete_and_remove_script_preserve_metadata_rules() {
         .path()
         .join("gamemasterstudio/scripts/enemy.json")
         .exists());
-    p.undo(p.snapshot().revision).unwrap();
-    assert_eq!(master(&p).scripts.columns[0].overrides.len(), 1);
 }
 
 #[test]
@@ -406,7 +388,7 @@ fn metadata_only_changes_commit_and_untracked_metadata_blocks_branch_switch() {
 }
 
 #[test]
-fn failed_metadata_write_rolls_back_csv_state_and_history() {
+fn failed_metadata_write_rolls_back_csv_state_and_revision() {
     let (dir, mut p) = fixture();
     let before = master(&p);
     let revision = p.snapshot().revision;
@@ -496,7 +478,7 @@ fn conflicting_script_metadata_aborts_merge_without_losing_changes() {
 }
 
 #[test]
-fn reverting_an_input_recalculates_in_the_same_undo_operation() {
+fn reverting_an_input_recalculates_in_the_same_operation() {
     use gamemasterstudio_core::project::SemanticChange;
     let (_dir, mut p) = fixture();
     apply(&mut p, set_script("power", Some("return 0;")));
@@ -508,7 +490,6 @@ fn reverting_an_input_recalculates_in_the_same_undo_operation() {
             edits: vec![edit(&["1", "a"], "attack", "50")],
         },
     );
-    let before = master(&p);
     let change = p
         .snapshot()
         .changes
@@ -518,8 +499,6 @@ fn reverting_an_input_recalculates_in_the_same_undo_operation() {
     apply(&mut p, Operation::RevertChange { change });
     assert_eq!(master(&p).table.rows[0][2], "20");
     assert_eq!(master(&p).table.rows[0][3], "40");
-    p.undo(p.snapshot().revision).unwrap();
-    assert_eq!(master(&p), before);
 }
 
 #[test]

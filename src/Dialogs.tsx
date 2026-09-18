@@ -465,7 +465,6 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 <code key={JSON.stringify(k)}>{JSON.stringify(k)}</code>
               ))}
             </div>
-            <p className="hint">Undo で元に戻せます。</p>
           </div>
           {footer("Row を削除", !editable || !ui.selectedKeys.length, true)}
         </form>
@@ -526,7 +525,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
             </label>
             <p>この Column のすべての値と Cell Comment を削除します。</p>
             <p className="hint">
-              Primary Key Column は削除できません。Undo で元に戻せます。
+              Primary Key Column は削除できません。
             </p>
           </div>
           {footer("Column を削除", !editable || !column, true)}

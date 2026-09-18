@@ -1,7 +1,7 @@
 import type { CellEdit } from "./types.ts";
 
-// A fill emits one edit request per cell. Hold them until fillEnd so saving
-// and repository Undo treat the drag as a single operation.
+// A fill emits one edit request per cell. Hold them until fillEnd to save
+// the drag as a single operation.
 export class CellEditBatch {
   private pending: CellEdit[] | null = null;
 

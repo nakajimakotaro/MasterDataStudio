@@ -50,8 +50,6 @@ pub struct ProjectDelta {
 pub struct ProjectUpdate {
     pub root: String,
     pub revision: u64,
-    pub can_undo: bool,
-    pub can_redo: bool,
     pub branch: String,
     pub protected: bool,
     pub data: ProjectDelta,
@@ -136,8 +134,6 @@ pub struct Snapshot {
     pub name: String,
     pub identity: Identity,
     pub data: ProjectData,
-    pub can_undo: bool,
-    pub can_redo: bool,
     pub revision: u64,
     pub git: GitStatus,
     pub changes: Vec<SemanticChange>,
@@ -300,8 +296,6 @@ pub struct Project {
     pub(crate) root: PathBuf,
     pub(crate) data: ProjectData,
     pub(crate) identity: Identity,
-    pub(crate) undo: Vec<ProjectData>,
-    pub(crate) redo: Vec<ProjectData>,
     pub(crate) revision: u64,
 }
 
@@ -346,8 +340,6 @@ impl Project {
                 root,
                 data,
                 merge,
-                undo: vec![],
-                redo: vec![],
                 revision: 0,
             });
         }
@@ -407,8 +399,6 @@ impl Project {
             identity: identity(&root),
             root,
             data: ProjectData { config, masters },
-            undo: vec![],
-            redo: vec![],
             revision: 0,
         })
     }
@@ -473,8 +463,6 @@ impl Project {
                 .into_owned(),
             identity: self.identity.clone(),
             data: self.data.clone(),
-            can_undo: !self.undo.is_empty(),
-            can_redo: !self.redo.is_empty(),
             revision: self.revision,
             git,
             changes,
@@ -625,8 +613,6 @@ impl Project {
         ProjectUpdate {
             root: self.root.to_string_lossy().into_owned(),
             revision: self.revision,
-            can_undo: !self.undo.is_empty(),
-            can_redo: !self.redo.is_empty(),
             protected: self
                 .data
                 .config
@@ -1036,48 +1022,10 @@ impl Project {
     fn commit_edit(&mut self, next: ProjectData) -> Result<()> {
         if next != self.data {
             self.persist(&next)?;
-            self.undo.push(std::mem::replace(&mut self.data, next));
-            if self.undo.len() > 100 {
-                self.undo.remove(0);
-            }
-            self.redo.clear();
+            self.data = next;
             self.revision += 1;
         }
         Ok(())
-    }
-
-    pub fn undo(&mut self, revision: u64) -> Result<Snapshot> {
-        self.undo_update(revision)?;
-        Ok(self.snapshot())
-    }
-
-    pub fn undo_update(&mut self, revision: u64) -> Result<ProjectUpdate> {
-        let branch = self.writable(revision)?;
-        let delta = self.data_delta(self.undo.last().unwrap_or(&self.data), revision);
-        if let Some(next) = self.undo.last().cloned() {
-            self.persist(&next)?;
-            self.undo.pop();
-            self.redo.push(std::mem::replace(&mut self.data, next));
-            self.revision += 1;
-        }
-        Ok(self.edit_update(delta, branch))
-    }
-
-    pub fn redo(&mut self, revision: u64) -> Result<Snapshot> {
-        self.redo_update(revision)?;
-        Ok(self.snapshot())
-    }
-
-    pub fn redo_update(&mut self, revision: u64) -> Result<ProjectUpdate> {
-        let branch = self.writable(revision)?;
-        let delta = self.data_delta(self.redo.last().unwrap_or(&self.data), revision);
-        if let Some(next) = self.redo.last().cloned() {
-            self.persist(&next)?;
-            self.redo.pop();
-            self.undo.push(std::mem::replace(&mut self.data, next));
-            self.revision += 1;
-        }
-        Ok(self.edit_update(delta, branch))
     }
 
     fn persist(&self, next: &ProjectData) -> Result<()> {
@@ -1252,8 +1200,6 @@ impl Project {
         self.merge = fresh.merge;
         self.data = fresh.data;
         self.identity = fresh.identity;
-        self.undo.clear();
-        self.redo.clear();
         self.revision += 1;
         Ok(self.snapshot())
     }

@@ -1,9 +1,10 @@
+#[cfg(unix)]
+use gamemasterstudio_core::storage;
 use gamemasterstudio_core::{
     comments::{CommentTarget, Comments, Identity},
-    config::{MasterDefinition, ProjectConfig, CONFIG_PATH},
+    config::{MasterDefinition, ProjectConfig},
     csv_data::Table,
     project::{git, CellEdit, Operation, Project},
-    storage,
 };
 use std::{fs, path::Path};
 
@@ -175,17 +176,13 @@ fn bytes(dir: &Path, path: &str) -> Vec<u8> {
 }
 
 #[test]
-fn edits_autosave_and_undo_redo_persist_across_all_operation_types() {
+fn edits_autosave_persist_across_all_operation_types() {
     let (dir, mut project) = fixture();
     add(&mut project, "a", "1");
     let original = bytes(dir.path(), "masters/waves.csv");
     apply(&mut project, serde_json::from_value(serde_json::json!({"type":"editCells","masterId":"waves","edits":[{"primaryKey":["a","1"],"column":"name","value":"Slime"},{"primaryKey":["a","1"],"column":"note","value":"001"}]})).unwrap());
     let modified = bytes(dir.path(), "masters/waves.csv");
     assert_ne!(original, modified);
-    project.undo(project.snapshot().revision).unwrap();
-    assert_eq!(bytes(dir.path(), "masters/waves.csv"), original);
-    project.redo(project.snapshot().revision).unwrap();
-    assert_eq!(bytes(dir.path(), "masters/waves.csv"), modified);
     apply(
         &mut project,
         Operation::AddColumn {
@@ -214,11 +211,10 @@ fn edits_autosave_and_undo_redo_persist_across_all_operation_types() {
     assert_eq!(bytes(dir.path(), "masters/waves.csv"), modified);
     let reopened = Project::open(dir.path()).unwrap().snapshot();
     assert_eq!(reopened.data, project.snapshot().data);
-    assert!(!reopened.can_undo && !reopened.can_redo);
 }
 
 #[test]
-fn invalid_pk_edits_reject_whole_batch_without_history_or_disk_changes() {
+fn invalid_pk_edits_reject_whole_batch_without_state_or_disk_changes() {
     let (dir, mut project) = fixture();
     add(&mut project, "a", "1");
     add(&mut project, "a", "2");
@@ -242,8 +238,6 @@ fn invalid_pk_edits_reject_whole_batch_without_history_or_disk_changes() {
         }));
         assert_eq!(project.snapshot().data, before.data);
         assert_eq!(project.snapshot().revision, before.revision);
-        assert_eq!(project.snapshot().can_undo, before.can_undo);
-        assert_eq!(project.snapshot().can_redo, before.can_redo);
         assert_eq!(bytes(dir.path(), "masters/waves.csv"), disk);
         assert_eq!(
             bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
@@ -281,7 +275,7 @@ fn invalid_pk_edits_reject_whole_batch_without_history_or_disk_changes() {
 }
 
 #[test]
-fn primary_key_fill_renumbers_rows_and_comments_in_one_undoable_operation() {
+fn primary_key_fill_renumbers_rows_and_comments_in_one_operation() {
     let (dir, mut project) = fixture();
     for wave in ["1", "2", "3"] {
         add(&mut project, "a", wave);
@@ -303,8 +297,6 @@ fn primary_key_fill_renumbers_rows_and_comments_in_one_undoable_operation() {
         );
     }
     let before = project.snapshot();
-    let csv_before = bytes(dir.path(), "masters/waves.csv");
-    let comments_before = bytes(dir.path(), "gamemasterstudio/comments/waves.json");
     let mut edits = vec![];
     for wave in 1..=3 {
         let primary_key = vec!["a".into(), wave.to_string()];
@@ -346,22 +338,6 @@ fn primary_key_fill_renumbers_rows_and_comments_in_one_undoable_operation() {
             original.comments.cells[i].comment
         );
     }
-    let csv_after = bytes(dir.path(), "masters/waves.csv");
-    let comments_after = bytes(dir.path(), "gamemasterstudio/comments/waves.json");
-    project.undo(after.revision).unwrap();
-    assert_eq!(project.snapshot().data, before.data);
-    assert_eq!(bytes(dir.path(), "masters/waves.csv"), csv_before);
-    assert_eq!(
-        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
-        comments_before
-    );
-    project.redo(project.snapshot().revision).unwrap();
-    assert_eq!(project.snapshot().data, after.data);
-    assert_eq!(bytes(dir.path(), "masters/waves.csv"), csv_after);
-    assert_eq!(
-        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
-        comments_after
-    );
     assert_eq!(
         Project::open(dir.path()).unwrap().snapshot().data,
         after.data
@@ -443,7 +419,7 @@ fn composite_key_swaps_move_comments_once_and_preserve_raw_strings() {
 }
 
 #[test]
-fn row_and_column_delete_remove_comments_and_undo_restores_exact_metadata() {
+fn row_and_column_delete_remove_comments() {
     let (dir, mut project) = fixture();
     add(&mut project, "a", "1");
     let key = vec!["a".into(), "1".into()];
@@ -482,11 +458,6 @@ fn row_and_column_delete_remove_comments_and_undo_restores_exact_metadata() {
         .comments
         .cells
         .is_empty());
-    project.undo(project.snapshot().revision).unwrap();
-    assert_eq!(
-        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
-        original
-    );
     apply(
         &mut project,
         Operation::DeleteRows {
@@ -503,25 +474,8 @@ fn row_and_column_delete_remove_comments_and_undo_restores_exact_metadata() {
             && data.comments.rows.is_empty()
             && data.comments.cells.is_empty()
     );
-    project.undo(project.snapshot().revision).unwrap();
-    assert_eq!(
-        bytes(dir.path(), "gamemasterstudio/comments/waves.json"),
-        original
-    );
     comment(&mut project, CommentTarget::Table, "  \r\n ");
-    apply(
-        &mut project,
-        Operation::DeleteRows {
-            master_id: "waves".into(),
-            primary_keys: vec![vec!["a".into(), "1".into()]],
-        },
-    );
     assert!(!dir
-        .path()
-        .join("gamemasterstudio/comments/waves.json")
-        .exists());
-    project.undo(project.snapshot().revision).unwrap();
-    assert!(dir
         .path()
         .join("gamemasterstudio/comments/waves.json")
         .exists());
@@ -594,7 +548,7 @@ fn duplication_copies_values_but_not_comments() {
 }
 
 #[test]
-fn blank_identity_allows_read_but_blocks_edits_and_undo() {
+fn blank_identity_allows_read_but_blocks_edits() {
     let (dir, _) = fixture();
     git(dir.path(), &["config", "--local", "user.name", ""]).unwrap();
     let mut project = Project::open(dir.path()).unwrap();
@@ -608,7 +562,6 @@ fn blank_identity_allows_read_but_blocks_edits_and_undo() {
             0
         )
         .is_err());
-    assert!(project.undo(0).is_err());
 }
 
 #[test]
@@ -638,7 +591,7 @@ fn invalid_master_is_isolated_and_never_overwritten() {
 }
 
 #[test]
-fn empty_master_can_be_configured_with_undo_but_populated_master_cannot() {
+fn empty_master_can_be_configured_but_populated_master_cannot() {
     let (dir, mut project) = fixture();
     apply(
         &mut project,
@@ -650,15 +603,19 @@ fn empty_master_can_be_configured_with_undo_but_populated_master_cannot() {
     );
     assert!(dir.path().join("data/waves.csv").exists());
     assert!(!dir.path().join("masters/waves.csv").exists());
-    project.undo(project.snapshot().revision).unwrap();
-    assert!(!dir.path().join("data/waves.csv").exists());
-    assert!(dir.path().join("masters/waves.csv").exists());
-    add(&mut project, "a", "1");
+    apply(
+        &mut project,
+        Operation::AddRow {
+            master_id: "waves".into(),
+            primary_key: vec!["1".into()],
+            duplicate_from: None,
+        },
+    );
     assert!(project
         .apply(
             Operation::ConfigureMaster {
                 master_id: "waves".into(),
-                path: "data/waves.csv".into(),
+                path: "other/waves.csv".into(),
                 primary_key: vec!["wave".into()]
             },
             project.snapshot().revision
@@ -667,21 +624,7 @@ fn empty_master_can_be_configured_with_undo_but_populated_master_cannot() {
 }
 
 #[test]
-fn master_creation_undo_removes_csv_and_config_entry_and_redo_restores() {
-    let (dir, mut project) = fixture();
-    project.undo(project.snapshot().revision).unwrap();
-    assert!(!dir.path().join("masters/waves.csv").exists());
-    assert!(ProjectConfig::parse(&bytes(dir.path(), CONFIG_PATH))
-        .unwrap()
-        .masters
-        .is_empty());
-    project.redo(project.snapshot().revision).unwrap();
-    assert!(dir.path().join("masters/waves.csv").exists());
-    assert!(Project::initialize(dir.path()).is_err());
-}
-
-#[test]
-fn failed_save_keeps_snapshot_and_undo_history_unchanged() {
+fn failed_save_keeps_snapshot_and_revision_unchanged() {
     let (dir, mut project) = fixture();
     add(&mut project, "a", "1");
     let before = project.snapshot();
@@ -700,7 +643,6 @@ fn failed_save_keeps_snapshot_and_undo_history_unchanged() {
         .is_err());
     assert_eq!(project.snapshot().data, before.data);
     assert_eq!(project.snapshot().revision, before.revision);
-    assert_eq!(project.snapshot().can_undo, before.can_undo);
     assert_eq!(bytes(dir.path(), "masters/waves.csv"), original);
 }
 
@@ -756,7 +698,7 @@ fn comment_json_order_is_tuple_then_column_and_orphans_are_errors() {
 }
 
 #[test]
-fn create_rows_saves_draft_values_atomically_and_supports_undo() {
+fn create_rows_saves_draft_values_atomically() {
     let (dir, mut project) = fixture();
     let before = project.snapshot();
     let disk = bytes(dir.path(), "masters/waves.csv");
@@ -788,6 +730,4 @@ fn create_rows_saves_draft_values_atomically_and_supports_undo() {
         bytes(dir.path(), "masters/waves.csv"),
         b"stage,wave,name,note\na,1,Slime,001\na,2,Slime,001\n"
     );
-    project.undo(project.snapshot().revision).unwrap();
-    assert_eq!(project.snapshot().data, before.data);
 }

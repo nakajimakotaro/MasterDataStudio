@@ -34,8 +34,6 @@ export function applyProjectUpdate(current: Snapshot, update: ProjectUpdate): Sn
   return {
     ...current,
     revision: update.revision,
-    canUndo: update.canUndo,
-    canRedo: update.canRedo,
     git: { ...current.git, branch: update.branch, protected: update.protected },
     gitStale: current.gitStale || current.revision !== update.revision || current.git.branch !== update.branch,
     data: { config: update.data.config, masters },

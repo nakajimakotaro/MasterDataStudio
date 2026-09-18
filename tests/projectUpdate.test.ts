@@ -11,7 +11,7 @@ function fixture(): Snapshot {
   };
   return {
     root: "/project", name: "project", identity: { name: "Test", email: "test@example.com" },
-    revision: 3, canUndo: false, canRedo: false, changes: [], changesError: null, merge: null,
+    revision: 3, changes: [], changesError: null, merge: null,
     git: { branch: "work", upstream: null, ahead: 0, behind: 0, protected: false, trackedDirty: false, mergeInProgress: false, remotes: [], branches: ["work"] },
     data: {
       config: { version: 1, git: { protectedBranches: [] }, masters: { a: { path: "a.csv", primaryKey: ["id"] }, b: { path: "b.csv", primaryKey: ["id"] } } },
@@ -21,7 +21,7 @@ function fixture(): Snapshot {
 }
 
 function update(current: Snapshot, masters: ProjectUpdate["data"]["masters"]): ProjectUpdate {
-  return { root: current.root, branch: current.git.branch, protected: current.git.protected, revision: current.revision + 1, canUndo: true, canRedo: false, data: { baseRevision: current.revision, config: current.data.config, masters } };
+  return { root: current.root, branch: current.git.branch, protected: current.git.protected, revision: current.revision + 1, data: { baseRevision: current.revision, config: current.data.config, masters } };
 }
 
 test("cell updates preserve untouched row and master references without mutating the cache", () => {
@@ -36,7 +36,6 @@ test("cell updates preserve untouched row and master references without mutating
   assert.equal(next.data.masters.a.data!.table.rows[2], master.table.rows[2]);
   assert.deepEqual(next.data.masters.a.data!.table.rows[1], ["2", "edited"]);
   assert.equal(next.revision, 4);
-  assert.equal(next.canUndo, true);
   assert.deepEqual(current, before);
 });
 

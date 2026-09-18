@@ -356,7 +356,7 @@ fn history_reports_corrupt_snapshot_instead_of_fake_deletion() {
     assert!(p.history_detail(&oid).is_err());
 }
 #[test]
-fn protected_settings_validate_autosave_undo_review_and_commit() {
+fn protected_settings_validate_autosave_review_and_commit() {
     let b = data();
     let dir = repo(&b, &b, &b);
     let mut p = Project::open(dir.path()).unwrap();
@@ -382,19 +382,12 @@ fn protected_settings_validate_autosave_undo_review_and_commit() {
             .len(),
         3
     );
-    p.undo(p.snapshot().revision).unwrap();
-    assert_eq!(
-        p.snapshot().data.config.git.protected_branches,
-        vec!["main"]
-    );
-    p.redo(p.snapshot().revision).unwrap();
     p.commit("Protection", false).unwrap();
     for branch in ["release/1", "hotfix/a1"] {
         p.switch_branch(branch, true).unwrap();
         assert!(p.snapshot().git.protected);
         assert!(p.commit("forbidden", false).is_err());
         assert!(p.merge_branch("incoming").is_err());
-        assert!(p.undo(p.snapshot().revision).is_err());
         assert!(!p.history(None, 0).unwrap().commits.is_empty());
         p.fetch().unwrap();
         p.switch_branch("work", false).unwrap();

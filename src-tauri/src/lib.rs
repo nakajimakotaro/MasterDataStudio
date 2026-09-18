@@ -135,16 +135,6 @@ fn preview_edit(
 }
 
 #[tauri::command(async)]
-fn undo(revision: u64, state: State<AppState>) -> Result<ProjectUpdate, String> {
-    with_project(state, |p| p.undo_update(revision))
-}
-
-#[tauri::command(async)]
-fn redo(revision: u64, state: State<AppState>) -> Result<ProjectUpdate, String> {
-    with_project(state, |p| p.redo_update(revision))
-}
-
-#[tauri::command(async)]
 fn set_identity(name: String, email: String, state: State<AppState>) -> Result<Snapshot, String> {
     with_project(state, |p| p.set_identity(&name, &email))
 }
@@ -278,8 +268,6 @@ pub fn run() {
             get_project,
             edit_project,
             preview_edit,
-            undo,
-            redo,
             set_identity,
             git_fetch,
             git_update,

@@ -82,7 +82,7 @@ fn apply_delta(data: &mut ProjectData, update: ProjectUpdate) {
 }
 
 #[test]
-fn updates_reconstruct_full_snapshots_through_structural_edits_and_undo() {
+fn updates_reconstruct_full_snapshots_through_structural_edits() {
     let (_dir, mut p) = fixture(3);
     let mut cached = p.snapshot();
     let operations = vec![
@@ -128,20 +128,14 @@ fn updates_reconstruct_full_snapshots_through_structural_edits_and_undo() {
         },
     ];
     for operation in operations {
-        let before = cached.data.clone();
         let update = p
             .apply_calculated_update(operation, vec![], cached.revision)
             .unwrap();
         assert_eq!(update.data.base_revision, cached.revision);
         assert!(!update.data.masters.contains_key("b"));
-        let revision = update.revision;
+        cached.revision = update.revision;
         apply_delta(&mut cached.data, update);
         assert_eq!(cached.data, p.snapshot().data);
-        let undone = p.undo(revision).unwrap();
-        assert_eq!(undone.data, before);
-        let redone = p.redo(undone.revision).unwrap();
-        assert_eq!(redone.data, cached.data);
-        cached = redone;
     }
 }
 
@@ -280,10 +274,6 @@ fn git_metadata_and_script_changes_are_refreshed_on_demand() {
         serde_json::to_value(&state.changes).unwrap()
     );
     assert_eq!(review.script_changes, state.script_changes);
-    let undone = p.undo_update(updated.revision).unwrap();
-    assert!(p.repository_state().unwrap().script_changes.is_empty());
-    let redone = p.redo_update(undone.revision).unwrap();
-    assert_eq!(p.repository_state().unwrap().revision, redone.revision);
 }
 
 #[test]
@@ -304,7 +294,6 @@ fn lightweight_edits_still_reject_external_protected_branch_and_merge_changes() 
     assert!(p
         .apply_calculated_update(edit(), vec![], update.revision)
         .is_err());
-    assert!(p.undo_update(update.revision).is_err());
     git(dir.path(), &["checkout", "work"]).unwrap();
     let head = git(dir.path(), &["rev-parse", "HEAD"]).unwrap();
     fs::write(dir.path().join(".git/MERGE_HEAD"), format!("{head}\n")).unwrap();
@@ -312,11 +301,10 @@ fn lightweight_edits_still_reject_external_protected_branch_and_merge_changes() 
     assert!(p
         .apply_calculated_update(edit(), vec![], update.revision)
         .is_err());
-    assert!(p.undo_update(update.revision).is_err());
 }
 
 #[test]
-fn ordinary_edits_and_undo_redo_only_run_git_editability_checks() {
+fn ordinary_edits_only_run_git_editability_checks() {
     let dir = tempfile::tempdir().unwrap();
     let log = dir.path().join("git-trace.log");
     let output = std::process::Command::new(std::env::current_exe().unwrap())
@@ -358,8 +346,6 @@ fn git_trace_edit_scenario() {
     fs::write(std::env::var("GMS_EDIT_TRACE_LOG").unwrap(), "").unwrap();
     p.preview_scripts(edit(), revision).unwrap();
     let update = p.apply_calculated_update(edit(), vec![], revision).unwrap();
-    let undone = p.undo_update(update.revision).unwrap();
-    let redone = p.redo_update(undone.revision).unwrap();
-    p.apply_calculated_update(edit(), vec![], redone.revision)
+    p.apply_calculated_update(edit(), vec![], update.revision)
         .unwrap();
 }

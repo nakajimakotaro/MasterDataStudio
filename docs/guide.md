@@ -33,7 +33,6 @@ VITE_AG_GRID_LICENSE_KEY=your-license-key
 4. **Master を作成** で ID、CSV path、Column 一覧、Primary Key を入力します。Columns / Primary Key はそれぞれ 1 行に 1 つ入力します。複合キーの順序は Primary Key の入力順です。
 5. Master を開き、セルのダブルクリックで編集します。Row 追加・複製・削除、Column 追加・削除はツールバーから操作します。
 6. セルを選択し、右側 Inspector から Table / Row / Cell Comment を編集します。入力欄を離れるか `⌘/Ctrl + Enter` で確定・自動保存します。本文を空白だけにすると削除します。
-7. Undo / Redo はツールバー、またはグリッドにフォーカスがある状態で `⌘/Ctrl + Z` / `⌘/Ctrl + Shift + Z`。入力欄の編集中は通常のテキスト Undo です。
 
 CSV とコメントは操作確定時に自動保存されます。Save ボタンはありません。
 
@@ -45,12 +44,11 @@ CSV とコメントは操作確定時に自動保存されます。Save ボタ�
 - 保存順は Primary Key tuple の raw string 辞書順。Grid の sort / filter は保存順に影響しません。
 - Column は末尾追加、初期値は空文字。削除は確認ダイアログを経由します。
 - コピーは Grid の `⌘/Ctrl + C`。複数セル貼り付けはフォーカスしたセルを左上にして適用します。範囲選択後の「選択範囲を埋める」で同じ値を一括設定できます。
-- **オートフィル**: セルまたは範囲を選択し、右下の小さな四角を上下左右にドラッグします。1セルなら値をそのままコピーし、`1, 2` や `10, 20` のように複数の数値を選ぶと続きの連番を埋めます。文字列の範囲は繰り返します。`Alt/Option` を押しながらドラッグすると数値の連番とコピーを切り替えられます。検索・並び替え後の表示順で適用し、既存の行・列の範囲内で操作できます。範囲を縮めてもセルは消去しません。保存済みセルの変更はドラッグ1回で1つの Undo 操作になります。新規行は他の編集と同様に「新規行を保存」で確定します。
+- **オートフィル**: セルまたは範囲を選択し、右下の小さな四角を上下左右にドラッグします。1セルなら値をそのままコピーし、`1, 2` や `10, 20` のように複数の数値を選ぶと続きの連番を埋めます。文字列の範囲は繰り返します。`Alt/Option` を押しながらドラッグすると数値の連番とコピーを切り替えられます。検索・並び替え後の表示順で適用し、既存の行・列の範囲内で操作できます。範囲を縮めてもセルは消去しません。保存済みセルの変更はドラッグ1回でまとめて自動保存します。新規行は他の編集と同様に「新規行を保存」で確定します。
 - 貼り付け・Fill・Clear は論理操作ごとに一括適用。Primary Key の連番変更や入れ替えは、全セルの変更後に空・重複がないか検証します。テーブルを超える貼り付けも拒否します。
 - Row / Column を削除すると、対応するコメントも同時に削除します。Row 複製はコメントを複製しません。
 - Row をクリックし、Shift を押しながら終了行をクリックすると、その間の行をまとめて選択できます。`⌘/Ctrl + クリック` または左端のチェックボックスで個別に選択・解除できます。左上のチェックボックスまたは表内で `⌘/Ctrl + A` を使うと、検索・フィルターに一致する全行を選択できます。
 - 選択後、ツールバーの複製ボタンまたは選択行の右クリックメニューから一括複製できます。100 行選択すれば 100 行すべてのセル値をコピーし、複製した行を選択します。複製・追加した未保存行は、並び替え中でも追加順で表の一番下に表示します。Primary Key を重複しない値に変更して「新規行を保存」で確定してください。保存後は通常の並び替えに従います。
-- Undo / Redo は Project 全体の操作履歴で、直近 100 操作。Project の開き直し、終了で消えます。新しい編集で Redo を消去します。
 - 空の Master では Settings から path / Primary Key を変更できます。Row があれば読み取り専用です。
 - CSV / コメントを正しく読み込めない Master はエラー表示で編集を無効化します。他の Master は引き続き操作できます。
 - 入力欄では OS の自動大文字化・自動修正・スペルチェック・入力補完（オートフィル）を無効化しています。Branch 名、Master ID、CSV path など、大文字と小文字を区別する値をそのまま入力できます。AG Grid のセル編集のみ、Grid が生成する入力欄のためブラウザ既定の挙動が残ります。
@@ -100,7 +98,7 @@ crates/core/src/
   config.rs              Project Config の読み書きと検証
   csv_data.rs            CSV と Primary Key
   comments.rs            コメントと作者・日時
-  project.rs             編集操作、snapshot、Undo / Redo、Git Identity
+  project.rs             編集操作、snapshot、Git Identity
   storage.rs             path 検証、一時ファイル、atomic replace と rollback
   merge.rs               UI / Git 非依存の 3-way Merge Engine
   merge_git.rs           Git index stages、Merge session、Resolve / Stage / Commit
@@ -124,11 +122,11 @@ pnpm tauri build
 pnpm tauri build --debug --bundles app
 ```
 
-Rust テストでは canonical CSV、複合キー、設定・path 検証、コメントの作者維持と削除、Undo / Redo の保存、書き込み失敗時の復元、破損 Master の分離などを検証します。包括的な UI / E2E テストスイートは追加していません。
+Rust テストでは canonical CSV、複合キー、設定・path 検証、コメントの作者維持と削除、書き込み失敗時の復元、破損 Master の分離などを検証します。包括的な UI / E2E テストスイートは追加していません。
 
 ## 実装範囲
 
-Project の初期化・読み込み、設定、Master 一覧・作成、CSV parse / serialize、複合 Primary Key、AG Grid Editor、Cell / Row / Column 編集、空文字、3 種類のコメント、自動保存、Undo / Redo を実装しています。
+Project の初期化・読み込み、設定、Master 一覧・作成、CSV parse / serialize、複合 Primary Key、AG Grid Editor、Cell / Row / Column 編集、空文字、3 種類のコメント、自動保存 を実装しています。
 
 Phase 2 の Git status / Branch / Commit / Push / Fetch / Update / Change Review / Semantic Diff / Revert と、Phase 3 の 3-way Merge / Conflict Resolver / Resolve & Stage を実装しています。Phase 4 の Comment semantic merge、History、Protected Branch 設定と UX 改善も実装しています。
 
@@ -152,7 +150,7 @@ Phase 2 の Git status / Branch / Commit / Push / Fetch / Update / Change Review
 - Master の path / Primary Key が食い違う場合は、Master の定義とデータをまとめて選択します。異なる Master が同じ CSV path を使用するなど、組み合わせた Config が無効になる場合は Project 全体の選択を求めます。
 - コメントは Table / Row / Cell の identity ごとに本文を semantic merge します。同じ identity の本文が競合したときだけ選択・手動編集を求めます。
 - 解決途中の選択は Rust session に保持します。Complete Merge までは Working Tree / index stages を書き換えません。再起動・Project 再オープン時は Git の Merge state から再構築し、選択をやり直せます。
-- Merge 中の通常編集・Undo / Redo・通常 Commit・Branch 切替・Update は禁止します。Fetch と Identity 設定は利用できます。
+- Merge 中の通常編集・通常 Commit・Branch 切替・Update は禁止します。Fetch と Identity 設定は利用できます。
 - Stage / Commit 失敗時は保存前のファイルと Index を復元し、session の解決内容を保持して再試行できます。Merge に管理対象外の競合が含まれる場合、アプリが開始した Merge は自動で中止します。管理対象外でも競合せず Git がマージした変更は Merge commit に含まれます。
 - 複数の merge base がある Merge、壊れた入力、通常ファイル以外の競合は対応しません。アプリから開始した場合は自動中止し、再オープン時は理由と中止操作を表示します。
 
@@ -201,9 +199,9 @@ Git の first-parent 履歴を表示し、Merge commit は先頭の親との差�
 
 - **Project Settings → Protected Branches** で 1 行に 1 pattern を設定し、Project Config に自動保存します。`*` / `?` / `[abc]` などの case-sensitive glob に対応し、不正・重複 pattern を拒否します。
 - 設定は保護対象外の Working Branch で変更し、Commit で共有します。現在の Branch を新たに保護する設定は、変更を Commit できなくなるため拒否します。
-- 保護ブランチでは初回 Commit 前も Master / Comment / 設定の編集、Undo / Redo / Revert、Commit、手動 Merge を禁止します。Fetch、fast-forward only Update、History / Change Review の閲覧、Working Branch 作成は利用できます。
+- 保護ブランチでは初回 Commit 前も Master / Comment / 設定の編集 / Revert、Commit、手動 Merge を禁止します。Fetch、fast-forward only Update、History / Change Review の閲覧、Working Branch 作成は利用できます。
 - 上部に upstream と ahead / behind、Push を表示します。保護ブランチから開く Branch dialog は新規作成を初期選択します。
 - Master 一覧に Modified を表示し、Change Review にはコメントの対象・変更前後の本文と保護設定変更も表示します。差分を読み込めない場合はエラーを表示します。
 - Dialog 切替時に入力状態を初期化し、閲覧専用では Revert / Master 作成などの操作を無効化します。
 
-`phase_four.rs` ではコメントの body 比較の全組み合わせ、日時・作者の採用、複合キーの各コメント対象、構造削除、Git conflict の復元と手動解決、履歴のページ送り・読み取り専用性、保護設定の保存・Undo / Redo、保護ブランチの fast-forward 制限を検証します。
+`phase_four.rs` ではコメントの body 比較の全組み合わせ、日時・作者の採用、複合キーの各コメント対象、構造削除、Git conflict の復元と手動解決、履歴のページ送り・読み取り専用性、保護設定の保存、保護ブランチの fast-forward 制限を検証します。

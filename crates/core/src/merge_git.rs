@@ -349,8 +349,6 @@ impl Project {
                 return Err(format!("Merge を中止し、開始前の状態へ戻しました: {error}"));
             }
             self.merge = Some(session);
-            self.undo.clear();
-            self.redo.clear();
             self.revision += 1;
             if self
                 .merge

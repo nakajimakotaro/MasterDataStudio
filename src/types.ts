@@ -32,8 +32,6 @@ export type Snapshot = {
   name: string;
   identity: Identity;
   revision: number;
-  canUndo: boolean;
-  canRedo: boolean;
   git: GitStatus;
   changes: SemanticChange[];
   changesError: string | null;
@@ -50,7 +48,7 @@ export type Snapshot = {
 export type MasterUpdate =
   | { kind: "replace"; entry: Snapshot["data"]["masters"][string] }
   | { kind: "rows"; rows: [number, string[]][]; rowCount: number; comments: Comments; scripts: Scripts; scriptError: string | null; error: string | null };
-export type ProjectUpdate = Pick<Snapshot, "root" | "revision" | "canUndo" | "canRedo"> & {
+export type ProjectUpdate = Pick<Snapshot, "root" | "revision"> & {
   branch: string;
   protected: boolean;
   data: {

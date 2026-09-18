@@ -24,7 +24,7 @@ Gitに詳しくないプランナーでも、マスターデータの変更を�
 ## できること
 
 * **表計算のように、まとめて編集。**
-  コピー＆ペースト、連番のオートフィル、行の一括複製に対応。検索やフィルターで対象を絞り、Undo / Redoでやり直せます。
+  コピー＆ペースト、連番のオートフィル、行の一括複製に対応。検索やフィルターで対象を絞れます。
 
 * **何を変えたかを、データとして確認。**
   追加・変更・削除を色分けし、セルごとの変更前後を確認できます。
@@ -169,7 +169,7 @@ return Number(row.attack) * 2 + Number(row.defense);
 * 通常セルの編集・貼り付け・Fillで、その行のScript列を再計算します。Script定義の追加・変更では、その列の全行を再計算します。
 * Scriptセルは青、手動上書きしたセルは黄色で表示します。上書きしたセルは以後の再計算から除外します。セルの右クリックメニュー「Remove Override」で計算値に戻せます。
 * 行の追加・複製時はScriptを計算します。複製元のPrimary Key・Script値・Manual Override・コメントはコピーしません。Scriptを持つMasterでは、保存済み行のPrimary Keyは変更できません。
-* Scriptを削除すると現在値を維持した通常列に戻ります。計算結果・定義・Overrideは同じ操作として自動保存し、Undo / RedoではScriptを再実行せず、その操作の前後の状態を復元します。
+* Scriptを削除すると現在値を維持した通常列に戻ります。計算結果・定義・Overrideは同じ操作として自動保存します。
 * CSVには計算済みの値を保存します。定義とOverrideは `gamemasterstudio/scripts/<master-id>.json` に保存し、Changes画面からCSVと一緒にCommitできます。Script metadataの競合は自動解決せず、アプリから開始したMergeを中止して元の状態へ戻します。
 
 通常モードでProjectやBranchを開くと再計算します。既存の閲覧専用ルールは維持するため、Protected BranchやGit Identity未設定の状態で計算結果に差分が出た場合は保存せずエラーを表示します。Working Branchを作成し、Identityを設定して再計算してください。
