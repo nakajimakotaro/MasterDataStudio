@@ -156,7 +156,7 @@ fn change_review_preserves_deleted_values_and_is_read_only() {
             primary_keys: vec![vec!["10".into()]],
         },
     );
-    let snapshot = project.snapshot();
+    let snapshot = project.full_snapshot();
     let status = git(dir.path(), &["status", "--porcelain"]).unwrap();
     let review = project.change_review(snapshot.revision).unwrap();
     let before = review.before.unwrap();

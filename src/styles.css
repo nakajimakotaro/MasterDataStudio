@@ -565,7 +565,7 @@ button.icon-button {
 .master-list-head,
 .master-list-row {
   display: grid;
-  grid-template-columns: minmax(180px, 2fr) minmax(110px, 1.4fr) 65px 135px;
+  grid-template-columns: minmax(180px, 2fr) minmax(110px, 1.4fr) 32px;
   gap: 12px;
   align-items: center;
   padding: 15px 20px;
@@ -1370,7 +1370,7 @@ dialog::backdrop {
   }
   .master-list-head,
   .master-list-row {
-    grid-template-columns: minmax(150px, 1.5fr) minmax(100px, 1fr) 45px 115px;
+    grid-template-columns: minmax(150px, 1.5fr) minmax(100px, 1fr) 32px;
     padding-left: 15px;
     padding-right: 15px;
     gap: 8px;

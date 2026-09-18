@@ -27,7 +27,7 @@ fn clones_project_with_origin_and_upstream() {
     .unwrap();
     let target = tempfile::tempdir().unwrap();
     let project = Project::clone_repository(&source_path(&source), target.path()).unwrap();
-    let snapshot = project.snapshot();
+    let snapshot = project.full_snapshot();
     assert_eq!(snapshot.git.branch, "main");
     assert!(snapshot.git.remotes.contains(&"origin".to_string()));
     assert_eq!(snapshot.git.upstream.as_deref(), Some("origin/main"));

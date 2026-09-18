@@ -191,7 +191,7 @@ fn edits_autosave_persist_across_all_operation_types() {
         },
     );
     assert_eq!(
-        project.snapshot().data.masters["waves"]
+        project.full_snapshot().data.masters["waves"]
             .data
             .as_ref()
             .unwrap()
@@ -209,8 +209,8 @@ fn edits_autosave_persist_across_all_operation_types() {
         },
     );
     assert_eq!(bytes(dir.path(), "masters/waves.csv"), modified);
-    let reopened = Project::open(dir.path()).unwrap().snapshot();
-    assert_eq!(reopened.data, project.snapshot().data);
+    let reopened = Project::open(dir.path()).unwrap().full_snapshot();
+    assert_eq!(reopened.data, project.full_snapshot().data);
 }
 
 #[test]
@@ -225,7 +225,7 @@ fn invalid_pk_edits_reject_whole_batch_without_state_or_disk_changes() {
         },
         "keep metadata",
     );
-    let before = project.snapshot();
+    let before = project.full_snapshot();
     let disk = bytes(dir.path(), "masters/waves.csv");
     let metadata = bytes(dir.path(), "gamemasterstudio/comments/waves.json");
     for value in ["2", ""] {
@@ -236,7 +236,7 @@ fn invalid_pk_edits_reject_whole_batch_without_state_or_disk_changes() {
         } else {
             "重複"
         }));
-        assert_eq!(project.snapshot().data, before.data);
+        assert_eq!(project.full_snapshot().data, before.data);
         assert_eq!(project.snapshot().revision, before.revision);
         assert_eq!(bytes(dir.path(), "masters/waves.csv"), disk);
         assert_eq!(
@@ -296,7 +296,7 @@ fn primary_key_fill_renumbers_rows_and_comments_in_one_operation() {
             wave,
         );
     }
-    let before = project.snapshot();
+    let before = project.full_snapshot();
     let mut edits = vec![];
     for wave in 1..=3 {
         let primary_key = vec!["a".into(), wave.to_string()];
@@ -319,7 +319,7 @@ fn primary_key_fill_renumbers_rows_and_comments_in_one_operation() {
             edits,
         },
     );
-    let after = project.snapshot();
+    let after = project.full_snapshot();
     assert_eq!(after.revision, before.revision + 1);
     let original = before.data.masters["waves"].data.as_ref().unwrap();
     let master = after.data.masters["waves"].data.as_ref().unwrap();
@@ -339,7 +339,7 @@ fn primary_key_fill_renumbers_rows_and_comments_in_one_operation() {
         );
     }
     assert_eq!(
-        Project::open(dir.path()).unwrap().snapshot().data,
+        Project::open(dir.path()).unwrap().full_snapshot().data,
         after.data
     );
 }
@@ -382,7 +382,7 @@ fn composite_key_swaps_move_comments_once_and_preserve_raw_strings() {
             edits,
         },
     );
-    let snapshot = project.snapshot();
+    let snapshot = project.full_snapshot();
     let master = snapshot.data.masters["waves"].data.as_ref().unwrap();
     for (key, body) in [(&second, "first"), (&first, "second")] {
         assert_eq!(
@@ -409,7 +409,7 @@ fn composite_key_swaps_move_comments_once_and_preserve_raw_strings() {
             }],
         },
     );
-    let reopened = Project::open(dir.path()).unwrap().snapshot();
+    let reopened = Project::open(dir.path()).unwrap().full_snapshot();
     let master = reopened.data.masters["waves"].data.as_ref().unwrap();
     assert!(master
         .comments
@@ -451,7 +451,7 @@ fn row_and_column_delete_remove_comments() {
             name: "name".into(),
         },
     );
-    assert!(project.snapshot().data.masters["waves"]
+    assert!(project.full_snapshot().data.masters["waves"]
         .data
         .as_ref()
         .unwrap()
@@ -465,7 +465,7 @@ fn row_and_column_delete_remove_comments() {
             primary_keys: vec![key],
         },
     );
-    let data = project.snapshot().data.masters["waves"]
+    let data = project.full_snapshot().data.masters["waves"]
         .data
         .clone()
         .unwrap();
@@ -485,7 +485,7 @@ fn row_and_column_delete_remove_comments() {
 fn comment_edit_preserves_creator_and_updates_repository_local_author() {
     let (dir, mut project) = fixture();
     comment(&mut project, CommentTarget::Table, "first");
-    let first = project.snapshot().data.masters["waves"]
+    let first = project.full_snapshot().data.masters["waves"]
         .data
         .as_ref()
         .unwrap()
@@ -497,7 +497,7 @@ fn comment_edit_preserves_creator_and_updates_repository_local_author() {
         .set_identity("Second", "second@example.com")
         .unwrap();
     comment(&mut project, CommentTarget::Table, "second\r\nline");
-    let second = project.snapshot().data.masters["waves"]
+    let second = project.full_snapshot().data.masters["waves"]
         .data
         .as_ref()
         .unwrap()
@@ -539,7 +539,7 @@ fn duplication_copies_values_but_not_comments() {
             duplicate_from: Some(key),
         },
     );
-    let data = project.snapshot().data.masters["waves"]
+    let data = project.full_snapshot().data.masters["waves"]
         .data
         .clone()
         .unwrap();
@@ -578,7 +578,9 @@ fn invalid_master_is_isolated_and_never_overwritten() {
     );
     fs::write(dir.path().join("masters/waves.csv"), b"broken").unwrap();
     let mut reopened = Project::open(dir.path()).unwrap();
-    assert!(reopened.snapshot().data.masters["waves"].error.is_some());
+    assert!(reopened.full_snapshot().data.masters["waves"]
+        .error
+        .is_some());
     apply(
         &mut reopened,
         Operation::AddRow {
@@ -627,7 +629,7 @@ fn empty_master_can_be_configured_but_populated_master_cannot() {
 fn failed_save_keeps_snapshot_and_revision_unchanged() {
     let (dir, mut project) = fixture();
     add(&mut project, "a", "1");
-    let before = project.snapshot();
+    let before = project.full_snapshot();
     // A non-directory ancestor fails preparation, before any CSV can be replaced.
     fs::write(dir.path().join("gamemasterstudio/comments"), b"blocker").unwrap();
     let original = bytes(dir.path(), "masters/waves.csv");
@@ -641,7 +643,9 @@ fn failed_save_keeps_snapshot_and_revision_unchanged() {
             before.revision
         )
         .is_err());
-    assert_eq!(project.snapshot().data, before.data);
+    assert_eq!(bytes(dir.path(), "masters/waves.csv"), original);
+    fs::remove_file(dir.path().join("gamemasterstudio/comments")).unwrap();
+    assert_eq!(project.full_snapshot().data, before.data);
     assert_eq!(project.snapshot().revision, before.revision);
     assert_eq!(bytes(dir.path(), "masters/waves.csv"), original);
 }
@@ -700,7 +704,7 @@ fn comment_json_order_is_tuple_then_column_and_orphans_are_errors() {
 #[test]
 fn create_rows_saves_draft_values_atomically() {
     let (dir, mut project) = fixture();
-    let before = project.snapshot();
+    let before = project.full_snapshot();
     let disk = bytes(dir.path(), "masters/waves.csv");
     for rows in [
         vec![vec!["", "1", "Slime", ""]],
@@ -715,7 +719,7 @@ fn create_rows_saves_draft_values_atomically() {
                 .collect(),
         };
         assert!(project.apply(operation, before.revision).is_err());
-        assert_eq!(project.snapshot().data, before.data);
+        assert_eq!(project.full_snapshot().data, before.data);
         assert_eq!(bytes(dir.path(), "masters/waves.csv"), disk);
     }
     apply(

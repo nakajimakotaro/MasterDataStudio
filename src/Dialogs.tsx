@@ -119,7 +119,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
     </div>
   );
 
-  const gitReadError = repository.error ?? (ui.dialog === "commit" ? repository.data?.changesError : null);
+  const gitReadError = repository.error;
   if (needsGit && (repository.isPending || gitReadError)) {
     return <Modal title="Git 状態を確認">
       <div className="modal-body" role="status">{gitReadError
@@ -289,11 +289,11 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
     </form></Modal>;
 
   if (ui.dialog === "changes")
-    return <Modal title={project.gitStale ? "Change Review" : `Change Review · ${project.changes.length}`} className="review-modal"><ChangeReview project={project} /></Modal>;
+    return <Modal title="Change Review" className="review-modal"><ChangeReview project={project} /></Modal>;
 
   if (ui.dialog === "commit")
     return <Modal title="Commit"><form onSubmit={submit(()=>{void action.mutateAsync({command:"commit",message,push:false}).then(()=>ui.set({dialog:null})).catch(()=>{});})}>
-      <div className="modal-body"><p>{project.changes.length} semantic changes と Script metadata {project.scriptChanges?.length ?? 0} ファイルを一括 Commit します。</p><label>Commit message<textarea required autoFocus rows={4} value={message} onChange={e=>setMessage(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label></div>
+      <div className="modal-body"><p>保存済みの CSV・コメント・設定・Script metadata の変更を一括 Commit します。</p><label>Commit message<textarea required autoFocus rows={4} value={message} onChange={e=>setMessage(e.target.value)} autoCorrect="off" autoCapitalize="none" spellCheck={false} autoComplete="off" /></label></div>
       <div className="modal-footer"><button type="button" disabled={busy} onClick={()=>ui.set({dialog:"changes"})}>戻る</button><button type="button" disabled={busy||!editable||!message.trim()} onClick={()=>{void action.mutateAsync({command:"commit",message,push:true}).then(()=>ui.set({dialog:null})).catch(()=>{})}}>Commit & Push</button><button className="primary" disabled={busy||!editable||!message.trim()}>Commit</button></div>
     </form></Modal>;
 

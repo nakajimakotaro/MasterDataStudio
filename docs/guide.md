@@ -109,6 +109,12 @@ crates/core/tests/       Phase 1–4 の Domain / Repository テスト
 
 AG Grid は [read-only edit](https://www.ag-grid.com/javascript-data-grid/value-setters/#read-only-edit) を使用します。編集要求を Rust に送り、保存成功後の snapshot で画面を更新します。IPC の編集は直列化し、revision でも古い状態の操作を拒否します。保存失敗時は Rust のデータと履歴を進めません。
 
+通常の Project session は設定・Git Identity・revision を保持し、全 Master の CSV は保持しません。Workspace / Overview と左側の Master 一覧は定義だけで表示し、行数・全体のコメント件数は集計しません。Editor は選択した Master だけを読み込み、切替時に前の Master を解放します。編集時も対象 Master のファイルだけを読み込み・検証して保存し、変更行を返します。
+
+Change Review は Git の変更ファイル一覧（未追跡ファイルを含む）を先に取得し、選択した Master の HEAD と保存済みファイルだけを比較します。差分や変更前後の全プロジェクトデータは通常の snapshot に含めません。「変更のある行のみ」では、変更のない行のセル表示モデルも作成しません。Branch / Commit 用の Git 状態取得は意味的差分を計算しません。
+
+Column Script の Project / Branch 起動時再計算は維持します。Script metadata のある Master だけを1つずつ処理し、全テーブルを画面へ取得しません。Merge session と History の1コミット分の差分キャッシュは別管理です。`full_snapshot()` は全データの明示的な検証用読み取りで、desktop IPC では使用しません。
+
 複数ファイルの変更は、すべての一時ファイルと復元用コピーを用意してから置換します。通常の書き込み失敗では既に置換したファイルも復元します。各ファイルの置換は atomic ですが、複数ファイル全体のプロセスクラッシュ・電源断に対するトランザクション保証はありません。
 
 ## 検証・ビルド

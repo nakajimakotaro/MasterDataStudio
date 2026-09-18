@@ -36,7 +36,7 @@ export function changeTone(change: SemanticChange): ReviewTone {
   return "modified";
 }
 
-export function buildReviewTable(data: ChangeReviewData, masterId: string) {
+export function buildReviewTable(data: ChangeReviewData, masterId: string, onlyChanged = false) {
   const changes = data.changes.filter(change => change.masterId === masterId);
   const previous = data.before?.masters[masterId]?.data;
   const current = data.after.masters[masterId]?.data;
@@ -54,8 +54,11 @@ export function buildReviewTable(data: ChangeReviewData, masterId: string) {
   const byRow = new Map<string, SemanticChange[]>();
   const byColumn = new Map<string, SemanticChange[]>();
   const byCell = new Map<string, SemanticChange[]>();
+  const changedRows = new Set<string>();
   const push = (map: Map<string, SemanticChange[]>, key: string, change: SemanticChange) => map.set(key, [...(map.get(key) ?? []), change]);
   for (const change of changes) {
+    if (change.kind === "cell") changedRows.add(keyId(change.primaryKey));
+    if (change.kind === "comment" && change.target.kind === "cell") changedRows.add(keyId(change.target.primaryKey));
     if (change.kind === "cell") push(byCell, JSON.stringify([change.primaryKey, change.column]), change);
     else if (change.kind === "addedRow" || change.kind === "deletedRow") push(byRow, keyId(change.primaryKey), change);
     else if (change.kind === "addedColumn" || change.kind === "deletedColumn") push(byColumn, change.column, change);
@@ -70,7 +73,10 @@ export function buildReviewTable(data: ChangeReviewData, masterId: string) {
     const related = [...structural, ...(byColumn.get(name) ?? [])];
     return { name, changes: related, tone: related.length ? changeTone(related[0]) : null };
   });
-  const rows: ReviewRow[] = withDeleted([...newRows.keys()], [...oldRows.keys()]).map(id => {
+  const ids = withDeleted([...newRows.keys()], [...oldRows.keys()]);
+  const visible = onlyChanged && !structural.length && !byColumn.size
+    ? ids.filter(id => byRow.has(id) || changedRows.has(id)) : ids;
+  const rows: ReviewRow[] = visible.map(id => {
     const key = JSON.parse(id) as PrimaryKey;
     const oldRow = oldRows.get(id);
     const newRow = newRows.get(id);
@@ -93,5 +99,5 @@ export function buildReviewTable(data: ChangeReviewData, masterId: string) {
     }
     return { id, key, cells, tones: [...tones], changed: tones.size > 0 || rowChanges.length > 0 };
   });
-  return { def, columns, rows, tableChanges, changes };
+  return { def, columns, rows, totalRows: ids.length, tableChanges, changes };
 }

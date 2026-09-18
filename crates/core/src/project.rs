@@ -61,9 +61,6 @@ pub struct RepositoryState {
     pub root: String,
     pub revision: u64,
     pub git: GitStatus,
-    pub changes: Vec<SemanticChange>,
-    pub script_changes: Vec<String>,
-    pub changes_error: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -127,7 +124,7 @@ pub struct ChangeReview {
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Snapshot {
+pub struct FullSnapshot {
     pub safe_mode: bool,
     pub script_changes: Vec<String>,
     pub root: String,
@@ -139,6 +136,29 @@ pub struct Snapshot {
     pub changes: Vec<SemanticChange>,
     pub changes_error: Option<String>,
     pub merge: Option<crate::merge::MergeView>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    pub safe_mode: bool,
+    pub root: String,
+    pub name: String,
+    pub identity: Identity,
+    pub data: ProjectData,
+    pub revision: u64,
+    pub git: GitStatus,
+    pub merge: Option<crate::merge::MergeView>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewSummary {
+    pub root: String,
+    pub revision: u64,
+    pub masters: Vec<String>,
+    pub project_settings: bool,
+    pub script_changes: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -290,10 +310,44 @@ pub enum Operation {
     },
 }
 
+impl Operation {
+    fn master_id(&self) -> Option<&str> {
+        match self {
+            Self::SetProtectedBranches { .. } => None,
+            Self::RevertChange { change } => match change {
+                SemanticChange::ProjectConfig { .. } => None,
+                SemanticChange::MasterDefinition { master_id, .. }
+                | SemanticChange::AddedMaster { master_id }
+                | SemanticChange::DeletedMaster { master_id }
+                | SemanticChange::AddedColumn { master_id, .. }
+                | SemanticChange::DeletedColumn { master_id, .. }
+                | SemanticChange::AddedRow { master_id, .. }
+                | SemanticChange::DeletedRow { master_id, .. }
+                | SemanticChange::Cell { master_id, .. }
+                | SemanticChange::Comment { master_id, .. } => Some(master_id),
+            },
+            Self::SetScript { master_id, .. }
+            | Self::ReplaceScripts { master_id, .. }
+            | Self::RemoveOverride { master_id, .. }
+            | Self::RecalculateScripts { master_id }
+            | Self::EditCells { master_id, .. }
+            | Self::CreateRows { master_id, .. }
+            | Self::AddRow { master_id, .. }
+            | Self::DeleteRows { master_id, .. }
+            | Self::AddColumn { master_id, .. }
+            | Self::DeleteColumn { master_id, .. }
+            | Self::SetComment { master_id, .. }
+            | Self::CreateMaster { master_id, .. }
+            | Self::ConfigureMaster { master_id, .. } => Some(master_id),
+        }
+    }
+}
+
 pub struct Project {
     pub safe_mode: bool,
     pub(crate) merge: Option<crate::merge_git::MergeSession>,
     pub(crate) root: PathBuf,
+    // Live sessions retain configuration only; a scoped edit owns at most one master.
     pub(crate) data: ProjectData,
     pub(crate) identity: Identity,
     pub(crate) revision: u64,
@@ -332,7 +386,14 @@ impl Project {
     pub fn open(path: &Path) -> Result<Self> {
         let root = repository_root(path)?;
         if git(&root, &["rev-parse", "--verify", "MERGE_HEAD"]).is_ok() {
-            let data = crate::merge_git::read_source(&root, "HEAD")?;
+            let config = ProjectConfig::parse(&git_bytes(
+                &root,
+                &["show", &format!("HEAD:{CONFIG_PATH}")],
+            )?)?;
+            let data = ProjectData {
+                config,
+                masters: BTreeMap::new(),
+            };
             let merge = Some(crate::merge_git::MergeSession::recover(&root));
             return Ok(Self {
                 safe_mode: false,
@@ -347,16 +408,35 @@ impl Project {
         let bytes = storage::read_optional(&config_path)?
             .ok_or("Project Config がありません。「Project を初期化」を使用してください。")?;
         let config = ProjectConfig::parse(&bytes)?;
+        Ok(Self {
+            safe_mode: false,
+            merge: None,
+            identity: identity(&root),
+            root,
+            data: ProjectData {
+                config,
+                masters: BTreeMap::new(),
+            },
+            revision: 0,
+        })
+    }
+
+    fn read_data(&self, selected: Option<&str>) -> ProjectData {
+        let root = &self.root;
+        let config = self.data.config.clone();
         let mut masters = BTreeMap::new();
         for (id, def) in &config.masters {
+            if selected.is_some_and(|selected| selected != id) {
+                continue;
+            }
             let load = || -> Result<Master> {
-                let path = storage::safe_path(&root, &def.path)?;
+                let path = storage::safe_path(root, &def.path)?;
                 let table = Table::parse(
                     &fs::read(path).map_err(|e| format!("{}: {e}", def.path))?,
                     def,
                 )?;
                 let comment_path =
-                    storage::safe_path(&root, &format!("gamemasterstudio/comments/{id}.json"))?;
+                    storage::safe_path(root, &format!("gamemasterstudio/comments/{id}.json"))?;
                 let mut comments = match storage::read_optional(&comment_path)? {
                     Some(bytes) => serde_json::from_slice::<Comments>(&bytes)
                         .map_err(|e| format!("Comment JSON: {e}"))?,
@@ -364,7 +444,7 @@ impl Project {
                 };
                 comments.validate(&table, def)?;
                 let script_path =
-                    storage::safe_path(&root, &format!("gamemasterstudio/scripts/{id}.json"))?;
+                    storage::safe_path(root, &format!("gamemasterstudio/scripts/{id}.json"))?;
                 let mut scripts: Scripts = storage::read_optional(&script_path)?
                     .map(|bytes| {
                         serde_json::from_slice(&bytes).map_err(|e| format!("Script JSON: {e}"))
@@ -393,14 +473,49 @@ impl Project {
                 },
             );
         }
-        Ok(Self {
-            safe_mode: false,
+        ProjectData { config, masters }
+    }
+
+    pub fn master(&self, id: &str, revision: u64) -> Result<MasterEntry> {
+        if revision != self.revision {
+            return Err("編集状態が更新されました。もう一度操作してください。".into());
+        }
+        self.read_data(Some(id))
+            .masters
+            .remove(id)
+            .ok_or_else(|| "Master がありません。".into())
+    }
+
+    /// Find scripts from metadata paths without loading any CSVs.
+    pub fn script_masters(&self) -> Result<Vec<String>> {
+        self.data
+            .config
+            .masters
+            .keys()
+            .filter_map(|id| {
+                match storage::safe_path(&self.root, &format!("gamemasterstudio/scripts/{id}.json"))
+                {
+                    Ok(path) if path.exists() => Some(Ok(id.clone())),
+                    Ok(_) => None,
+                    Err(error) => Some(Err(error)),
+                }
+            })
+            .collect()
+    }
+
+    fn scoped(&self, operation: &Operation) -> Self {
+        let data = operation
+            .master_id()
+            .map(|id| self.read_data(Some(id)))
+            .unwrap_or_else(|| self.data.clone());
+        Self {
+            root: self.root.clone(),
+            identity: self.identity.clone(),
+            revision: self.revision,
+            safe_mode: self.safe_mode,
             merge: None,
-            identity: identity(&root),
-            root,
-            data: ProjectData { config, masters },
-            revision: 0,
-        })
+            data,
+        }
     }
 
     pub fn clone_repository(url: &str, path: &Path) -> Result<Self> {
@@ -457,23 +572,42 @@ impl Project {
     }
 
     pub fn repository_state(&self) -> Result<RepositoryState> {
-        let changes = self.semantic_diff();
         Ok(RepositoryState {
             root: self.root.to_string_lossy().into_owned(),
             revision: self.revision,
             git: self.git_status()?,
-            changes_error: changes.as_ref().err().cloned(),
-            changes: changes.unwrap_or_default(),
-            script_changes: self.script_changes()?,
         })
     }
 
+    /// A workspace snapshot never reads CSVs or computes a semantic diff.
     pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            safe_mode: self.safe_mode,
+            root: self.root.to_string_lossy().into_owned(),
+            name: self
+                .root
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            identity: self.identity.clone(),
+            data: ProjectData {
+                config: self.data.config.clone(),
+                masters: BTreeMap::new(),
+            },
+            revision: self.revision,
+            git: self.git_status().unwrap_or_default(),
+            merge: self.merge.as_ref().map(|m| m.view()),
+        }
+    }
+
+    /// Explicit full inspection for core consumers; never retained by Project or used by desktop IPC.
+    pub fn full_snapshot(&self) -> FullSnapshot {
         let git = self.git_status().unwrap_or_default();
         let changes = self.semantic_diff();
         let changes_error = changes.as_ref().err().cloned();
         let changes = changes.unwrap_or_default();
-        Snapshot {
+        FullSnapshot {
             safe_mode: self.safe_mode,
             script_changes: self.script_changes().unwrap_or_default(),
             root: self.root.to_string_lossy().into_owned(),
@@ -484,7 +618,7 @@ impl Project {
                 .to_string_lossy()
                 .into_owned(),
             identity: self.identity.clone(),
-            data: self.data.clone(),
+            data: self.read_data(None),
             revision: self.revision,
             git,
             changes,
@@ -544,7 +678,7 @@ impl Project {
 
     pub fn preview(&self, operation: Operation, revision: u64) -> Result<PreparedEdit> {
         self.check_script_operation(&operation, revision)?;
-        self.prepare(operation)
+        self.scoped(&operation).prepare(operation)
     }
 
     /// JavaScript receives only the rows needed by the backend-selected targets.
@@ -591,8 +725,7 @@ impl Project {
         calculated: Vec<CalculatedCell>,
         revision: u64,
     ) -> Result<Snapshot> {
-        let (data, _) = self.calculate_edit(operation, calculated, revision)?;
-        self.commit_edit(data)?;
+        self.apply_calculated_update(operation, calculated, revision)?;
         Ok(self.snapshot())
     }
 
@@ -602,9 +735,14 @@ impl Project {
         calculated: Vec<CalculatedCell>,
         revision: u64,
     ) -> Result<ProjectUpdate> {
-        let (data, branch) = self.calculate_edit(operation, calculated, revision)?;
-        let delta = self.data_delta(&data, revision);
-        self.commit_edit(data)?;
+        // Only this operation owns parsed data; discard it after persistence.
+        self.check_script_operation(&operation, revision)?;
+        let mut scoped = self.scoped(&operation);
+        let (data, branch) = scoped.calculate_edit(operation, calculated, revision)?;
+        let delta = scoped.data_delta(&data, revision);
+        scoped.commit_edit(data)?;
+        self.data.config = scoped.data.config;
+        self.revision = scoped.revision;
         Ok(self.edit_update(delta, branch))
     }
 
@@ -703,7 +841,9 @@ impl Project {
         let targets_operation = operation.clone();
         match operation {
             Operation::RevertChange { change } => {
-                let head = self.head_data()?.ok_or("HEAD に Project がありません。")?;
+                let head = self
+                    .head_data_for(Some(targets_operation.master_id().unwrap_or("")))?
+                    .ok_or("HEAD に Project がありません。")?;
                 apply_revert(&mut next, &head, &change)?;
             }
             Operation::SetScript {
@@ -1273,22 +1413,48 @@ impl Project {
     }
 
     fn managed_paths(&self) -> Result<BTreeSet<String>> {
-        let mut result: BTreeSet<String> = files(&self.data)?.into_keys().collect();
-        if let Some(head) = self.head_data()? {
-            result.extend(files(&head)?.into_keys());
+        let mut paths = BTreeSet::from([CONFIG_PATH.to_string()]);
+        for config in std::iter::once(self.data.config.clone()).chain(self.head_config()?) {
+            for (id, def) in config.masters {
+                paths.insert(def.path);
+                for kind in ["comments", "scripts"] {
+                    let path = format!("gamemasterstudio/{kind}/{id}.json");
+                    if storage::safe_path(&self.root, &path)?.exists()
+                        || git(&self.root, &["ls-files", "--error-unmatch", "--", &path]).is_ok()
+                    {
+                        paths.insert(path);
+                    }
+                }
+            }
         }
-        result.extend(self.script_changes()?);
-        Ok(result)
+        paths.extend(self.script_changes()?);
+        Ok(paths)
     }
 
     fn head_data(&self) -> Result<Option<ProjectData>> {
-        let config_bytes = match git_bytes(&self.root, &["show", &format!("HEAD:{CONFIG_PATH}")]) {
-            Ok(v) => v,
-            Err(_) => return Ok(None),
+        self.head_data_for(None)
+    }
+
+    fn head_config(&self) -> Result<Option<ProjectConfig>> {
+        if git(&self.root, &["rev-parse", "--verify", "HEAD"]).is_err() {
+            return Ok(None);
+        }
+        let spec = format!("HEAD:{CONFIG_PATH}");
+        if git(&self.root, &["cat-file", "-e", &spec]).is_err() {
+            return Ok(None);
+        }
+        ProjectConfig::parse(&git_bytes(&self.root, &["show", &spec])?).map(Some)
+    }
+
+    fn head_data_for(&self, selected: Option<&str>) -> Result<Option<ProjectData>> {
+        let Some(config) = self.head_config()? else {
+            return Ok(None);
         };
-        let config = ProjectConfig::parse(&config_bytes)?;
         let mut masters = BTreeMap::new();
         for (id, def) in &config.masters {
+            if selected.is_some_and(|selected| selected != id) {
+                continue;
+            }
             let load = || -> Result<Master> {
                 let table = Table::parse(
                     &git_bytes(&self.root, &["show", &format!("HEAD:{}", def.path)])?,
@@ -1334,7 +1500,7 @@ impl Project {
     }
 
     pub fn semantic_diff(&self) -> Result<Vec<SemanticChange>> {
-        diff_data(self.head_data()?.as_ref(), &self.data)
+        diff_data(self.head_data()?.as_ref(), &self.read_data(None))
     }
 
     /// Read both sides and the diff together, without requiring an editable branch.
@@ -1343,15 +1509,91 @@ impl Project {
             return Err("編集状態が更新されました。もう一度操作してください。".into());
         }
         let before = self.head_data()?;
-        let changes = diff_data(before.as_ref(), &self.data)?;
+        let after = self.read_data(None);
+        let changes = diff_data(before.as_ref(), &after)?;
         Ok(ChangeReview {
             before,
-            after: self.data.clone(),
+            after,
             changes,
             root: self.root.to_string_lossy().into_owned(),
             revision: self.revision,
             git: self.git_status()?,
             script_changes: self.script_changes()?,
+        })
+    }
+
+    /// Changed paths are read from Git; no CSV parsing or semantic diff here.
+    pub fn review_summary(&self, revision: u64) -> Result<ReviewSummary> {
+        if revision != self.revision {
+            return Err("編集状態が更新されました。もう一度操作してください。".into());
+        }
+        let before = self.head_config()?;
+        let mut paths = BTreeSet::new();
+        let tracked = if git(&self.root, &["rev-parse", "--verify", "HEAD"]).is_ok() {
+            git_bytes(
+                &self.root,
+                &["diff", "--name-only", "--no-renames", "-z", "HEAD", "--"],
+            )?
+        } else {
+            git_bytes(&self.root, &["ls-files", "--cached", "-z"])?
+        };
+        let untracked = git_bytes(
+            &self.root,
+            &["ls-files", "--others", "--exclude-standard", "-z"],
+        )?;
+        for bytes in [tracked, untracked] {
+            for path in bytes.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+                paths.insert(
+                    std::str::from_utf8(path)
+                        .map_err(|e| e.to_string())?
+                        .to_string(),
+                );
+            }
+        }
+        let mut masters = BTreeSet::new();
+        for config in before.iter().chain(std::iter::once(&self.data.config)) {
+            for (id, def) in &config.masters {
+                if paths.contains(&def.path)
+                    || paths.contains(&format!("gamemasterstudio/comments/{id}.json"))
+                    || before.as_ref().and_then(|c| c.masters.get(id))
+                        != self.data.config.masters.get(id)
+                {
+                    masters.insert(id.clone());
+                }
+            }
+        }
+        Ok(ReviewSummary {
+            root: self.root.to_string_lossy().into_owned(),
+            revision: self.revision,
+            masters: masters.into_iter().collect(),
+            project_settings: before.as_ref().map(|c| &c.git) != Some(&self.data.config.git),
+            script_changes: self.script_changes()?,
+        })
+    }
+
+    /// Review a single master, directly from HEAD and the working tree.
+    pub fn review_master(&self, revision: u64, id: &str) -> Result<ChangeReview> {
+        if revision != self.revision {
+            return Err("編集状態が更新されました。もう一度操作してください。".into());
+        }
+        let mut before = self.head_data_for(Some(id))?;
+        let mut after = self.read_data(Some(id));
+        // Configs also need scoping so unloaded masters are never treated as deleted.
+        for data in before.iter_mut().chain(std::iter::once(&mut after)) {
+            data.config.masters.retain(|key, _| key == id);
+        }
+        let mut changes = diff_data(before.as_ref(), &after)?;
+        if id != "(Project Settings)" {
+            changes.retain(|c| !matches!(c, SemanticChange::ProjectConfig { .. }));
+        }
+        Ok(ChangeReview {
+            before,
+            after,
+            changes,
+            root: self.root.to_string_lossy().into_owned(),
+            revision: self.revision,
+            git: self.git_status()?,
+            script_changes: vec![],
         })
     }
 
@@ -1496,27 +1738,32 @@ fn diff_master(
             });
         }
     }
-    let rows = |m: &Master,
-                d: &MasterDefinition|
-     -> Result<BTreeMap<PrimaryKey, BTreeMap<String, String>>> {
-        let ki = m.table.key_indices(d)?;
-        Ok(m.table
+    fn rows<'a>(
+        master: &'a Master,
+        def: &MasterDefinition,
+    ) -> Result<BTreeMap<PrimaryKey, &'a [String]>> {
+        let indices = master.table.key_indices(def)?;
+        Ok(master
+            .table
             .rows
             .iter()
-            .map(|r| {
-                (
-                    Table::key(r, &ki),
-                    m.table
-                        .columns
-                        .iter()
-                        .cloned()
-                        .zip(r.iter().cloned())
-                        .collect(),
-                )
-            })
+            .map(|row| (Table::key(row, &indices), row.as_slice()))
             .collect())
-    };
+    }
     let (br, wr) = (rows(b, bd)?, rows(w, wd)?);
+    let columns: Vec<_> = b
+        .table
+        .columns
+        .iter()
+        .enumerate()
+        .filter_map(|(bi, column)| {
+            w.table
+                .columns
+                .iter()
+                .position(|c| c == column)
+                .map(|wi| (column, bi, wi))
+        })
+        .collect();
     let keys: BTreeSet<_> = br.keys().chain(wr.keys()).cloned().collect();
     for key in keys {
         match (br.get(&key), wr.get(&key)) {
@@ -1529,23 +1776,19 @@ fn diff_master(
                 primary_key: key,
             }),
             (Some(a), Some(z)) => {
-                for c in b
-                    .table
-                    .columns
-                    .iter()
-                    .filter(|c| w.table.columns.contains(c))
-                {
-                    if a.get(c) != z.get(c) {
+                for (column, bi, wi) in &columns {
+                    if a[*bi] != z[*wi] {
                         out.push(SemanticChange::Cell {
                             master_id: id.into(),
                             primary_key: key.clone(),
-                            column: c.clone(),
-                            before: a[c].clone(),
-                            after: z[c].clone(),
+                            column: (*column).clone(),
+                            before: a[*bi].clone(),
+                            after: z[*wi].clone(),
                         });
                     }
                 }
             }
+
             _ => (),
         }
     }
@@ -1824,10 +2067,6 @@ fn column_index(table: &Table, column: &str) -> Result<usize> {
         .iter()
         .position(|c| c == column)
         .ok_or_else(|| format!("Column がありません: {column}"))
-}
-
-fn files(data: &ProjectData) -> Result<BTreeMap<String, Vec<u8>>> {
-    files_where(data, |_| true)
 }
 
 fn files_where(

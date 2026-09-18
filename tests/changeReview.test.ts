@@ -101,3 +101,15 @@ test("empty masters expose column changes and changed definitions without fabric
   assert.equal(rekeyed.rows[0].cells.get("id")?.tone, "modified");
   assert.equal(rekeyed.rows[0].cells.get("id")?.changes[0].kind, "masterDefinition");
 });
+
+test("changed-only review builds cells only for changed rows, while all-rows mode remains available", () => {
+  const rows = Array.from({ length: 20_000 }, (_, i) => [String(i), "same"]);
+  const before = master(["id", "value"], rows);
+  const after = master(["id", "value"], rows.map((row, i) => i === 9999 ? [row[0], "edited"] : row));
+  const input = data(before, after, [{ kind: "cell", masterId: "enemy", primaryKey: ["9999"], column: "value", before: "same", after: "edited" }]);
+  const changed = buildReviewTable(input, "enemy", true)!;
+  assert.equal(changed.totalRows, 20_000);
+  assert.equal(changed.rows.length, 1);
+  assert.equal(changed.rows[0].cells.get("value")?.after, "edited");
+  assert.equal(buildReviewTable(input, "enemy", false)!.rows.length, 20_000);
+});

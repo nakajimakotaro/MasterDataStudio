@@ -263,8 +263,43 @@ fn history_detail(
 }
 
 #[tauri::command(async)]
+fn script_masters(state: State<AppState>) -> Result<Vec<String>, String> {
+    with_project(state, |p| p.script_masters())
+}
+
+#[tauri::command(async)]
+fn read_master(
+    root: String,
+    master_id: String,
+    revision: u64,
+    state: State<AppState>,
+) -> Result<gamemasterstudio_core::project::MasterEntry, String> {
+    with_project(state, |p| {
+        if p.root_path().to_string_lossy() != root {
+            return Err("Project が切り替わりました。".into());
+        }
+        p.master(&master_id, revision)
+    })
+}
+
+#[tauri::command(async)]
+fn review_summary(
+    root: String,
+    revision: u64,
+    state: State<AppState>,
+) -> Result<gamemasterstudio_core::project::ReviewSummary, String> {
+    with_project(state, |p| {
+        if p.root_path().to_string_lossy() != root {
+            return Err("Project が切り替わりました。".into());
+        }
+        p.review_summary(revision)
+    })
+}
+
+#[tauri::command(async)]
 fn change_review(
     root: String,
+    master_id: String,
     revision: u64,
     state: State<AppState>,
 ) -> Result<gamemasterstudio_core::project::ChangeReview, String> {
@@ -273,7 +308,7 @@ fn change_review(
     if project.root_path().to_string_lossy() != root {
         return Err("Project が切り替わりました。".into());
     }
-    project.change_review(revision)
+    project.review_master(revision, &master_id)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -304,6 +339,9 @@ pub fn run() {
             project_history,
             history_detail,
             change_review,
+            read_master,
+            script_masters,
+            review_summary,
             repository_state
         ])
         .run(tauri::generate_context!())

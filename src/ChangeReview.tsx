@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { AgGridReact } from "ag-grid-react";
 import type { ColDef } from "ag-grid-community";
 import { KeyRound, RotateCcw, Search } from "lucide-react";
-import { useBusy, useChangeReview, useRepositoryAction } from "./api";
+import { useBusy, useChangeReview, useReviewSummary, useRepositoryAction } from "./api";
 import { describeChange } from "./ChangeDescription";
 import { masterColumn, masterGridTheme } from "./MasterGrid";
 import { buildReviewTable, changeTone, type ReviewRow, type ReviewTone } from "./reviewModel";
@@ -32,47 +32,43 @@ function ChangeDetail({ change, disabled }: { change: SemanticChange; disabled: 
 }
 
 export function ChangeReview({ project }: { project: Snapshot }) {
-  const review = useChangeReview(project);
+  const summary = useReviewSummary(project);
   const busy = useBusy();
   const ui = useUI();
+  const [selectedMaster, setSelectedMaster] = useState(ui.masterId);
   const editable = !!project.identity.name && !!project.identity.email && !project.git.protected && !project.git.mergeInProgress;
+  const masters = [...(summary.data?.projectSettings ? ["(Project Settings)"] : []), ...(summary.data?.masters ?? [])];
+  const masterId = masters.find(id => id === selectedMaster) ?? masters[0];
   return <>
-    {review.isPending && <div className="review-message" role="status">変更前後のデータを読み込み中…</div>}
-    {review.error && <div className="review-message inline-error" role="alert">差分を読み込めません: {String(review.error)} <button disabled={busy} onClick={() => void review.refetch()}>再試行</button></div>}
-    {review.data && !review.error && <ReviewContent key={project.root} data={review.data} initialMaster={ui.masterId} disabled={busy || !editable || review.isFetching} />}
-    {!!review.data?.scriptChanges?.length && <div className="review-message"><strong>Script metadata の変更（Commit 対象）</strong><ul>{review.data.scriptChanges.map(path => <li key={path}><code>{path}</code></li>)}</ul></div>}
+    {summary.isPending && <div className="review-message" role="status">変更ファイルを読み込み中…</div>}
+    {summary.error && <div className="review-message inline-error" role="alert">{String(summary.error)} <button disabled={busy} onClick={() => void summary.refetch()}>再試行</button></div>}
+    {summary.data && !summary.error && (masterId ? <div className="review-layout">
+      <nav className="review-masters" aria-label="変更した Master">
+        <div className="eyebrow">CHANGED MASTERS</div>
+        {masters.map(id => <button key={id} className={id === masterId ? "active" : ""} aria-current={id === masterId ? "page" : undefined} onClick={() => setSelectedMaster(id)}>
+          <strong>{id === "(Project Settings)" ? "Project Settings" : id}</strong>
+        </button>)}
+      </nav>
+      <ReviewMasterLoader key={masterId} project={project} masterId={masterId} disabled={busy || !editable || summary.isFetching} />
+    </div> : <div className="review-message empty-state">CSV / Comment の変更はありません。</div>)}
+    {!!summary.data?.scriptChanges.length && <div className="review-message"><strong>Script metadata の変更（Commit 対象）</strong><ul>{summary.data.scriptChanges.map(path => <li key={path}><code>{path}</code></li>)}</ul></div>}
     <div className="modal-footer">
       <button disabled={busy} onClick={() => ui.set({ dialog: null })}>閉じる</button>
-      <button className="primary" disabled={busy || !editable || (!review.data?.changes.length && !review.data?.scriptChanges?.length) || review.isFetching || !!review.error} onClick={() => ui.set({ dialog: "commit" })}>Commit へ</button>
+      <button className="primary" disabled={busy || !editable || (!masters.length && !summary.data?.scriptChanges.length) || summary.isFetching || !!summary.error} onClick={() => ui.set({ dialog: "commit" })}>Commit へ</button>
     </div>
   </>;
 }
 
-function ReviewContent({ data, initialMaster, disabled }: { data: ChangeReviewData; initialMaster: string | null; disabled: boolean }) {
-  const [selectedMaster, setSelectedMaster] = useState(initialMaster);
-  const counts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const c of data.changes) counts.set(c.masterId, (counts.get(c.masterId) ?? 0) + 1);
-    return counts;
-  }, [data.changes]);
-  const masters = [...counts.keys()];
-  const masterId = masters.find(id => id === selectedMaster) ?? masters[0];
-  if (!masterId) return <div className="review-message empty-state">CSV / Comment の変更はありません。</div>;
-  return <div className="review-layout">
-    <nav className="review-masters" aria-label="変更した Master">
-      <div className="eyebrow">CHANGED MASTERS</div>
-      {masters.map(id => <button key={id} className={id === masterId ? "active" : ""} aria-current={id === masterId ? "page" : undefined} onClick={() => setSelectedMaster(id)}>
-        <strong>{id === "(Project Settings)" ? "Project Settings" : id}</strong>
-        <small>{counts.get(id)!.toLocaleString()} 件の変更</small>
-      </button>)}
-    </nav>
-    <ReviewMaster key={masterId} data={data} masterId={masterId} disabled={disabled} />
-  </div>;
+function ReviewMasterLoader({ project, masterId, disabled }: { project: Snapshot; masterId: string; disabled: boolean }) {
+  const review = useChangeReview(project, masterId);
+  if (review.error) return <div className="review-message inline-error" role="alert">差分を読み込めません: {String(review.error)} <button disabled={disabled} onClick={() => void review.refetch()}>再試行</button></div>;
+  if (!review.data) return <div className="review-message" role="status">変更前後のデータを読み込み中…</div>;
+  return <ReviewMaster data={review.data} masterId={masterId} disabled={disabled || review.isFetching} />;
 }
 
 function ReviewMaster({ data, masterId, disabled }: { data: ChangeReviewData; masterId: string; disabled: boolean }) {
-  const table = useMemo(() => buildReviewTable(data, masterId), [data, masterId]);
   const [onlyChanged, setOnlyChanged] = useState(true);
+  const table = useMemo(() => buildReviewTable(data, masterId, onlyChanged), [data, masterId, onlyChanged]);
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<{ rowId: string | null; column: string } | null>(null);
   const [visibleRows, setVisibleRows] = useState(0);
@@ -152,7 +148,7 @@ function ReviewMaster({ data, masterId, disabled }: { data: ChangeReviewData; ma
             overlayNoRowsTemplate="<span>表示する行がありません。絞り込み条件や右側のテーブル・設定の変更を確認してください。</span>"
           />
         </div>
-        <div className="grid-footer"><span>{visibleRows.toLocaleString()} / {table.rows.length.toLocaleString()} rows · {table.columns.length} columns</span><span>Review · 閲覧専用</span></div>
+        <div className="grid-footer"><span>{visibleRows.toLocaleString()} / {table.totalRows.toLocaleString()} rows · {table.columns.length} columns</span><span>Review · 閲覧専用</span></div>
       </div>}
       <aside className={`review-inspector${table ? "" : " review-settings"}`} aria-label="変更の詳細">
         <div className="inspector-heading"><h2>変更の詳細</h2>{table && <button onClick={() => { setSelection(null); setDetailOffset(0); }}>テーブル・設定</button>}</div>

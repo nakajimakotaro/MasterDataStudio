@@ -244,14 +244,14 @@ fn git_merge_custom_comment_preserves_creator_and_stamps_resolver() {
     assert_eq!(
         Project::open(dir.path())
             .unwrap()
-            .snapshot()
+            .full_snapshot()
             .merge
             .unwrap()
             .remaining,
         1
     );
     p.complete_merge("Comment merge", s.revision).unwrap();
-    let s = p.snapshot();
+    let s = p.full_snapshot();
     let comment = s.data.masters["enemy"]
         .data
         .as_ref()
@@ -312,7 +312,8 @@ fn independent_comment_edits_auto_complete_git_merge() {
     let mut p = Project::open(dir.path()).unwrap();
     let s = p.merge_branch("incoming").unwrap();
     assert!(s.merge.is_none());
-    let m = &s.data.masters["enemy"].data.as_ref().unwrap().comments;
+    let master = p.master("enemy", s.revision).unwrap().data.unwrap();
+    let m = &master.comments;
     assert!(m.table.is_some());
     assert_eq!(m.rows.len(), 1);
     assert!(!s.git.tracked_dirty);
@@ -374,7 +375,7 @@ fn protected_settings_validate_autosave_review_and_commit() {
     assert_eq!(
         Project::open(dir.path())
             .unwrap()
-            .snapshot()
+            .full_snapshot()
             .data
             .config
             .git

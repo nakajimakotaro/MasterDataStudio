@@ -27,14 +27,11 @@ export type Definition = { path: string; primaryKey: string[] };
 export type Snapshot = {
   gitStale?: boolean;
   safeMode?: boolean;
-  scriptChanges?: string[];
   root: string;
   name: string;
   identity: Identity;
   revision: number;
   git: GitStatus;
-  changes: SemanticChange[];
-  changesError: string | null;
   merge: MergeView | null;
   data: {
     config: {
@@ -58,7 +55,8 @@ export type ProjectUpdate = Pick<Snapshot, "root" | "revision"> & {
   };
 };
 export type GitStatus = { branch: string; upstream: string | null; ahead: number; behind: number; protected: boolean; trackedDirty: boolean; mergeInProgress: boolean; remotes: string[]; branches: string[] };
-export type RepositoryState = Pick<Snapshot, "root" | "revision" | "git" | "changes" | "scriptChanges" | "changesError">;
+export type RepositoryState = Pick<Snapshot, "root" | "revision" | "git">;
+export type ReviewSummary = { root: string; revision: number; masters: string[]; projectSettings: boolean; scriptChanges: string[] };
 export type SemanticChange =
   | { kind: "projectConfig"; masterId: string; before: { protectedBranches: string[] } | null; after: { protectedBranches: string[] } }
   | { kind: "masterDefinition"; masterId: string; before: Definition; after: Definition }
@@ -136,7 +134,7 @@ export type MergeView = {
   error: string | null;
 };
 
-export type ChangeReviewData = Omit<RepositoryState, "changesError"> & { before: Snapshot["data"] | null; after: Snapshot["data"] };
+export type ChangeReviewData = RepositoryState & { changes: SemanticChange[]; scriptChanges: string[]; before: Snapshot["data"] | null; after: Snapshot["data"] };
 
 export type HistoryCommit = { oid: string; parents: string[]; author: Identity; authoredAt: string; subject: string };
 export type HistoryPage = { head: string | null; commits: HistoryCommit[]; hasMore: boolean; nextCursor: string | null };

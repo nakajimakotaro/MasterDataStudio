@@ -22,7 +22,7 @@ fn set_script(column: &str, script: Option<&str>) -> Operation {
     }
 }
 fn master(project: &Project) -> Master {
-    project.snapshot().data.masters["enemy"]
+    project.full_snapshot().data.masters["enemy"]
         .data
         .clone()
         .unwrap()
@@ -306,7 +306,7 @@ fn canonical_metadata_validates_and_safe_mode_can_repair_invalid_structure() {
     let mut metadata: Scripts = serde_json::from_str(r#"{"version":1,"columns":[{"column":"score","script":"return 1;\r\n","overrides":[["2","b"],["1","a"]]},{"column":"power","script":"return 2;","overrides":[]}]}"#).unwrap();
     let m = master(&p);
     metadata
-        .validate(&m.table, &p.snapshot().data.config.masters["enemy"])
+        .validate(&m.table, &p.full_snapshot().data.config.masters["enemy"])
         .unwrap();
     assert_eq!(metadata.columns[0].column, "power");
     assert_eq!(metadata.columns[1].overrides[0], strings(&["1", "a"]));
@@ -327,7 +327,7 @@ fn canonical_metadata_validates_and_safe_mode_can_repair_invalid_structure() {
     let mut invalid = metadata.clone();
     invalid.columns[1].overrides.push(strings(&["1", "a"]));
     assert!(invalid
-        .validate(&m.table, &p.snapshot().data.config.masters["enemy"])
+        .validate(&m.table, &p.full_snapshot().data.config.masters["enemy"])
         .is_err());
     fs::write(&path, serde_json::to_vec(&invalid).unwrap()).unwrap();
     let mut opened = Project::open(dir.path()).unwrap();
@@ -350,13 +350,15 @@ fn canonical_metadata_validates_and_safe_mode_can_repair_invalid_structure() {
     );
     assert!(master(&opened).script_error.is_none());
     fs::write(path, b"{").unwrap();
-    assert!(
-        Project::open(dir.path()).unwrap().snapshot().data.masters["enemy"]
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Script JSON")
-    );
+    assert!(Project::open(dir.path())
+        .unwrap()
+        .full_snapshot()
+        .data
+        .masters["enemy"]
+        .error
+        .as_ref()
+        .unwrap()
+        .contains("Script JSON"));
 }
 
 #[test]
@@ -364,9 +366,9 @@ fn metadata_only_changes_commit_and_untracked_metadata_blocks_branch_switch() {
     let (dir, mut p) = fixture();
     p.safe_mode = true;
     apply(&mut p, set_script("power", Some("return 1;")));
-    assert!(p.snapshot().changes.is_empty());
+    assert!(p.full_snapshot().changes.is_empty());
     assert_eq!(
-        p.snapshot().script_changes,
+        p.full_snapshot().script_changes,
         vec!["gamemasterstudio/scripts/enemy.json"]
     );
     assert!(p.switch_branch("blocked", true).is_err());
@@ -377,7 +379,7 @@ fn metadata_only_changes_commit_and_untracked_metadata_blocks_branch_switch() {
     )
     .unwrap()
     .contains("return 1;"));
-    assert!(p.snapshot().script_changes.is_empty());
+    assert!(p.full_snapshot().script_changes.is_empty());
     apply(&mut p, set_script("power", None));
     p.commit("remove script", false).unwrap();
     assert!(git(
@@ -410,6 +412,8 @@ fn failed_metadata_write_rolls_back_csv_state_and_revision() {
         },
     ];
     assert!(p.apply_calculated(op, cells, revision).is_err());
+    assert_eq!(fs::read(dir.path().join("enemy.csv")).unwrap(), csv);
+    fs::remove_file(dir.path().join("gamemasterstudio/scripts")).unwrap();
     assert_eq!(master(&p), before);
     assert_eq!(p.snapshot().revision, revision);
     assert_eq!(fs::read(dir.path().join("enemy.csv")).unwrap(), csv);
@@ -491,7 +495,7 @@ fn reverting_an_input_recalculates_in_the_same_operation() {
         },
     );
     let change = p
-        .snapshot()
+        .full_snapshot()
         .changes
         .into_iter()
         .find(|c| matches!(c, SemanticChange::Cell { column, .. } if column == "attack"))
@@ -512,7 +516,7 @@ fn configuring_an_empty_master_cannot_turn_a_script_column_into_a_key() {
         },
     );
     apply(&mut p, set_script("power", Some("return 0;")));
-    let before = p.snapshot().data;
+    let before = p.full_snapshot().data;
     assert!(p
         .apply(
             Operation::ConfigureMaster {
@@ -523,5 +527,5 @@ fn configuring_an_empty_master_cannot_turn_a_script_column_into_a_key() {
             p.snapshot().revision
         )
         .is_err());
-    assert_eq!(p.snapshot().data, before);
+    assert_eq!(p.full_snapshot().data, before);
 }

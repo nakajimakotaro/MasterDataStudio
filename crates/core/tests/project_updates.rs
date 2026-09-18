@@ -84,7 +84,7 @@ fn apply_delta(data: &mut ProjectData, update: ProjectUpdate) {
 #[test]
 fn updates_reconstruct_full_snapshots_through_structural_edits() {
     let (_dir, mut p) = fixture(3);
-    let mut cached = p.snapshot();
+    let mut cached = p.full_snapshot();
     let operations = vec![
         edit(),
         Operation::CreateRows {
@@ -135,7 +135,7 @@ fn updates_reconstruct_full_snapshots_through_structural_edits() {
         assert!(!update.data.masters.contains_key("b"));
         cached.revision = update.revision;
         apply_delta(&mut cached.data, update);
-        assert_eq!(cached.data, p.snapshot().data);
+        assert_eq!(cached.data, p.full_snapshot().data);
     }
 }
 
@@ -163,7 +163,7 @@ fn script_preview_sends_only_target_rows_and_updates_are_atomic() {
         })
         .collect();
     p.apply_calculated_update(op, calculated, revision).unwrap();
-    let before = p.snapshot();
+    let before = p.full_snapshot();
     let preview = p.preview_scripts(edit(), before.revision).unwrap();
     assert_eq!(preview.data.masters.len(), 1);
     assert_eq!(preview.data.config.masters.len(), 1);
@@ -174,7 +174,7 @@ fn script_preview_sends_only_target_rows_and_updates_are_atomic() {
     assert!(p
         .apply_calculated_update(edit(), vec![], before.revision)
         .is_err());
-    assert_eq!(p.snapshot().data, before.data);
+    assert_eq!(p.full_snapshot().data, before.data);
     let update = p
         .apply_calculated_update(
             edit(),
@@ -191,7 +191,7 @@ fn script_preview_sends_only_target_rows_and_updates_are_atomic() {
         .unwrap();
     let mut cached = before.data;
     apply_delta(&mut cached, update);
-    assert_eq!(cached, p.snapshot().data);
+    assert_eq!(cached, p.full_snapshot().data);
     assert!(p
         .apply_calculated_update(edit(), vec![], before.revision)
         .is_err());
@@ -204,7 +204,7 @@ fn script_preview_sends_only_target_rows_and_updates_are_atomic() {
 #[test]
 fn one_cell_payload_does_not_include_twenty_thousand_unchanged_rows() {
     let (_dir, mut p) = fixture(10_000);
-    let before = p.snapshot();
+    let before = p.full_snapshot();
     let revision = before.revision;
     let full_preview_bytes = serde_json::to_vec(&p.preview(edit(), revision).unwrap())
         .unwrap()
@@ -214,7 +214,9 @@ fn one_cell_payload_does_not_include_twenty_thousand_unchanged_rows() {
     assert!(compact_preview.data.masters.is_empty());
     let update = p.apply_calculated_update(edit(), vec![], revision).unwrap();
     let update_bytes = serde_json::to_vec(&update).unwrap().len();
-    let full_bytes = serde_json::to_vec(&p.snapshot()).unwrap().len();
+    let full_bytes = serde_json::to_vec(&p.full_snapshot()).unwrap().len();
+    let workspace_bytes = serde_json::to_vec(&p.snapshot()).unwrap().len();
+    assert!(workspace_bytes * 100 < full_bytes);
     assert_eq!(update.data.masters.len(), 1);
     match update.data.masters["a"].as_ref().unwrap() {
         MasterUpdate::Rows {
@@ -227,10 +229,11 @@ fn one_cell_payload_does_not_include_twenty_thousand_unchanged_rows() {
     }
     assert!(update_bytes * 100 < full_bytes);
     assert!(preview_bytes * 100 < full_preview_bytes);
+    eprintln!("Workspace: {workspace_bytes} bytes vs full read {full_bytes} bytes");
     eprintln!("20,000 rows: preview {full_preview_bytes} -> {preview_bytes} bytes; edit result {full_bytes} -> {update_bytes} bytes");
     let mut cached = before.data;
     apply_delta(&mut cached, update);
-    assert_eq!(cached, p.snapshot().data);
+    assert_eq!(cached, p.full_snapshot().data);
     let revision = p.snapshot().revision;
     let no_op = p.apply_calculated_update(edit(), vec![], revision).unwrap();
     assert_eq!(no_op.revision, revision);
@@ -240,7 +243,7 @@ fn one_cell_payload_does_not_include_twenty_thousand_unchanged_rows() {
 #[test]
 fn git_metadata_and_script_changes_are_refreshed_on_demand() {
     let (_dir, mut p) = fixture(3);
-    let before = p.snapshot();
+    let before = p.full_snapshot();
     let updated = p
         .apply_calculated_update(edit(), vec![], before.revision)
         .unwrap();
@@ -263,17 +266,17 @@ fn git_metadata_and_script_changes_are_refreshed_on_demand() {
     let state = p.repository_state().unwrap();
     assert_eq!(state.revision, updated.revision);
     assert!(state.git.tracked_dirty);
-    assert_eq!(state.changes.len(), 1);
+    let wire = serde_json::to_value(&state).unwrap();
+    assert!(wire.get("changes").is_none());
+    let summary = p.review_summary(updated.revision).unwrap();
+    assert_eq!(summary.masters, vec!["a"]);
     assert_eq!(
-        state.script_changes,
+        summary.script_changes,
         vec!["gamemasterstudio/scripts/a.json"]
     );
-    let review = p.change_review(updated.revision).unwrap();
-    assert_eq!(
-        serde_json::to_value(&review.changes).unwrap(),
-        serde_json::to_value(&state.changes).unwrap()
-    );
-    assert_eq!(review.script_changes, state.script_changes);
+    let review = p.review_master(updated.revision, "a").unwrap();
+    assert_eq!(review.changes.len(), 1);
+    assert_eq!(review.after.masters.len(), 1);
 }
 
 #[test]
@@ -348,4 +351,146 @@ fn git_trace_edit_scenario() {
     let update = p.apply_calculated_update(edit(), vec![], revision).unwrap();
     p.apply_calculated_update(edit(), vec![], update.revision)
         .unwrap();
+}
+
+#[test]
+fn workspace_and_git_reads_do_not_load_or_retain_master_contents() {
+    let (dir, p) = fixture(3);
+    // Table contents can become unreadable without breaking the workspace or Git dialogs.
+    fs::write(dir.path().join("b.csv"), "invalid CSV").unwrap();
+    let snapshot = p.snapshot();
+    assert_eq!(snapshot.data.config.masters.len(), 2);
+    assert!(snapshot.data.masters.is_empty());
+    let wire = serde_json::to_value(&snapshot).unwrap();
+    for field in ["changes", "changesError", "scriptChanges"] {
+        assert!(wire.get(field).is_none());
+    }
+    assert!(p.repository_state().unwrap().git.tracked_dirty);
+    let summary = p.review_summary(snapshot.revision).unwrap();
+    assert_eq!(summary.masters, vec!["b"]);
+    assert!(p.master("b", snapshot.revision).unwrap().error.is_some());
+    assert!(p.master("a", snapshot.revision).unwrap().data.is_some());
+    assert!(p.snapshot().data.masters.is_empty());
+    assert!(p.master("a", snapshot.revision + 1).is_err());
+}
+
+#[test]
+fn edits_and_reviews_read_only_the_target_and_use_saved_files() {
+    let (dir, mut p) = fixture(3);
+    fs::write(dir.path().join("b.csv"), "unrelated invalid CSV").unwrap();
+    // Reading and editing uses the file, not a project-open copy of its rows.
+    fs::write(
+        dir.path().join("a.csv"),
+        "id,value,computed\n000000,disk value,\n000001,keep me,\n",
+    )
+    .unwrap();
+    let revision = p.snapshot().revision;
+    assert_eq!(
+        p.master("a", revision).unwrap().data.unwrap().table.rows[0][1],
+        "disk value"
+    );
+    let update = p.apply_calculated_update(edit(), vec![], revision).unwrap();
+    assert_eq!(update.data.masters.len(), 1);
+    let master = p.master("a", update.revision).unwrap().data.unwrap();
+    assert_eq!(master.table.rows[0][1], "edited");
+    assert_eq!(master.table.rows[1][1], "keep me");
+    assert_eq!(
+        fs::read_to_string(dir.path().join("b.csv")).unwrap(),
+        "unrelated invalid CSV"
+    );
+    let review = p.review_master(update.revision, "a").unwrap();
+    assert_eq!(review.before.as_ref().unwrap().masters.len(), 1);
+    assert_eq!(review.after.masters.len(), 1);
+    assert!(review.changes.iter().any(|c| matches!(c,
+        gamemasterstudio_core::project::SemanticChange::Cell { master_id, after, .. }
+        if master_id == "a" && after == "edited")));
+    assert!(p.review_master(update.revision, "b").is_err());
+    assert!(p.review_master(revision, "a").is_err());
+    assert!(p.snapshot().data.masters.is_empty());
+}
+
+#[test]
+fn review_summary_handles_untracked_staged_deleted_and_config_changes() {
+    let (dir, mut p) = fixture(3);
+    let revision = p.snapshot().revision;
+    let update = p
+        .apply_calculated_update(
+            Operation::CreateMaster {
+                master_id: "new".into(),
+                path: "new.csv".into(),
+                primary_key: vec!["id".into()],
+                columns: vec!["id".into()],
+            },
+            vec![],
+            revision,
+        )
+        .unwrap();
+    assert_eq!(
+        p.review_summary(update.revision).unwrap().masters,
+        vec!["new"]
+    );
+    git(dir.path(), &["add", "a.csv"]).unwrap();
+    p.apply_calculated_update(edit(), vec![], update.revision)
+        .unwrap();
+    git(dir.path(), &["add", "a.csv"]).unwrap();
+    assert_eq!(
+        p.review_summary(p.snapshot().revision).unwrap().masters,
+        vec!["a", "new"]
+    );
+    // Delete a master definition and its CSV, then reopen the updated project metadata.
+    let mut config = p.snapshot().data.config;
+    config.masters.remove("b");
+    fs::write(
+        dir.path().join("gamemasterstudio/project.yaml"),
+        config.serialize().unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(dir.path().join("b.csv")).unwrap();
+    let p = Project::open(dir.path()).unwrap();
+    assert_eq!(p.review_summary(0).unwrap().masters, vec!["a", "b", "new"]);
+    let review = p.review_master(0, "b").unwrap();
+    assert!(review.after.masters.is_empty());
+    assert_eq!(review.before.unwrap().masters.len(), 1);
+    assert!(matches!(
+        review.changes[0],
+        gamemasterstudio_core::project::SemanticChange::DeletedMaster { .. }
+    ));
+}
+
+#[test]
+fn settings_review_and_script_discovery_do_not_require_csv_data() {
+    let (dir, mut p) = fixture(3);
+    fs::write(dir.path().join("b.csv"), "invalid").unwrap();
+    fs::create_dir_all(dir.path().join("gamemasterstudio/scripts")).unwrap();
+    fs::write(
+        dir.path().join("gamemasterstudio/scripts/a.json"),
+        r#"{"version":1,"columns":[]}"#,
+    )
+    .unwrap();
+    assert_eq!(p.script_masters().unwrap(), vec!["a"]);
+    let update = p
+        .apply_calculated_update(
+            Operation::SetProtectedBranches {
+                patterns: vec!["release/*".into()],
+            },
+            vec![],
+            p.snapshot().revision,
+        )
+        .unwrap();
+    assert!(update.data.masters.is_empty());
+    let summary = p.review_summary(update.revision).unwrap();
+    assert!(summary.project_settings);
+    assert_eq!(
+        summary.script_changes,
+        vec!["gamemasterstudio/scripts/a.json"]
+    );
+    let review = p
+        .review_master(update.revision, "(Project Settings)")
+        .unwrap();
+    assert!(review.before.unwrap().masters.is_empty());
+    assert!(review.after.masters.is_empty());
+    assert!(matches!(
+        review.changes[0],
+        gamemasterstudio_core::project::SemanticChange::ProjectConfig { .. }
+    ));
 }

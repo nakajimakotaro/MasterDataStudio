@@ -16,7 +16,7 @@ export function applyProjectUpdate(current: Snapshot, update: ProjectUpdate): Sn
       entry = change.entry;
     } else {
       const previous = Object.hasOwn(masters, id) ? masters[id].data : null;
-      if (!previous) throw new Error(`Master がありません: ${id}`);
+      if (!previous) continue; // An unopened Master has no editor data to update.
       const rows = previous.table.rows.slice(0, change.rowCount);
       for (const [index, row] of change.rows) rows[index] = row;
       entry = {
@@ -43,5 +43,5 @@ export function applyProjectUpdate(current: Snapshot, update: ProjectUpdate): Sn
 /** Ignore late reads from a project/revision which is no longer displayed. */
 export function applyRepositoryState(current: Snapshot | null | undefined, state: RepositoryState): Snapshot | null | undefined {
   if (!current || current.root !== state.root || current.revision !== state.revision) return current;
-  return { ...current, git: state.git, changes: state.changes, scriptChanges: state.scriptChanges, changesError: state.changesError, gitStale: false };
+  return { ...current, git: state.git, gitStale: false };
 }

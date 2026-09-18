@@ -263,7 +263,7 @@ fn git_stages_reopen_custom_resolution_stage_and_merge_commit() {
     )
     .unwrap();
     let mut reopened = Project::open(root).unwrap();
-    let s = reopened.snapshot();
+    let s = reopened.full_snapshot();
     let view = s.merge.unwrap();
     assert_eq!(view.conflicts[0].base, "100");
     assert_eq!(view.conflicts[0].ours, "120");
@@ -291,7 +291,7 @@ fn git_stages_reopen_custom_resolution_stage_and_merge_commit() {
     assert_eq!(
         Project::open(root)
             .unwrap()
-            .snapshot()
+            .full_snapshot()
             .merge
             .unwrap()
             .remaining,
@@ -384,7 +384,7 @@ fn project_config_conflict_can_be_reopened_and_chosen_as_a_master() {
         .unwrap()
         .contains("<<<<<<<"));
     let mut project = Project::open(root).unwrap();
-    let s = project.snapshot();
+    let s = project.full_snapshot();
     let v = s.merge.unwrap();
     assert_eq!(v.conflicts.len(), 1);
     assert_eq!(v.conflicts[0].kind, "projectConfig");
@@ -394,7 +394,13 @@ fn project_config_conflict_can_be_reopened_and_chosen_as_a_master() {
     let s = project.complete_merge("", s.revision).unwrap();
     assert_eq!(s.data.config.masters["enemy"].primary_key, vec!["wave"]);
     assert_eq!(
-        s.data.masters["enemy"].data.as_ref().unwrap().table.rows[0][2],
+        project
+            .master("enemy", s.revision)
+            .unwrap()
+            .data
+            .unwrap()
+            .table
+            .rows[0][2],
         "150"
     );
 }
@@ -422,7 +428,7 @@ fn failed_commit_keeps_index_stages_and_can_retry() {
     assert_eq!(
         Project::open(root)
             .unwrap()
-            .snapshot()
+            .full_snapshot()
             .merge
             .unwrap()
             .remaining,
@@ -476,7 +482,7 @@ fn textually_clean_merge_still_checks_definition_changes() {
     assert_eq!(view.remaining, 1);
     assert_eq!(view.conflicts[0].kind, "projectConfig");
     let mut project = Project::open(dir.path()).unwrap();
-    let s = project.snapshot();
+    let s = project.full_snapshot();
     let s = project
         .resolve_conflict(view.conflicts[0].id.clone(), Resolution::Theirs, s.revision)
         .unwrap();
@@ -486,7 +492,13 @@ fn textually_clean_merge_still_checks_definition_changes() {
         vec!["id", "wave"]
     );
     assert_eq!(
-        s.data.masters["enemy"].data.as_ref().unwrap().table.rows[0][2],
+        project
+            .master("enemy", s.revision)
+            .unwrap()
+            .data
+            .unwrap()
+            .table
+            .rows[0][2],
         "150"
     );
 }
@@ -553,7 +565,13 @@ fn delete_modify_master_conflict_can_keep_modified_master() {
         .unwrap();
     let s = project.complete_merge("", s.revision).unwrap();
     assert_eq!(
-        s.data.masters["enemy"].data.as_ref().unwrap().table.rows[0][2],
+        project
+            .master("enemy", s.revision)
+            .unwrap()
+            .data
+            .unwrap()
+            .table
+            .rows[0][2],
         "150"
     );
 }
@@ -701,7 +719,8 @@ fn twenty_thousand_conflicts_resolve_atomically_in_batches() {
         .unwrap();
     assert_eq!(s.merge.as_ref().unwrap().remaining, 0);
     let s = project.complete_merge("bulk resolved", s.revision).unwrap();
-    let rows = &s.data.masters["enemy"].data.as_ref().unwrap().table.rows;
+    let master = project.master("enemy", s.revision).unwrap().data.unwrap();
+    let rows = &master.table.rows;
     assert_eq!(rows.len(), 20_000);
     assert_eq!(rows.iter().filter(|r| r[2] == "150").count(), 10_000);
     assert_eq!(rows.iter().filter(|r| r[2] == "120").count(), 10_000);

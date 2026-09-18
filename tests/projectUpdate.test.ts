@@ -11,7 +11,7 @@ function fixture(): Snapshot {
   };
   return {
     root: "/project", name: "project", identity: { name: "Test", email: "test@example.com" },
-    revision: 3, changes: [], changesError: null, merge: null,
+    revision: 3, merge: null,
     git: { branch: "work", upstream: null, ahead: 0, behind: 0, protected: false, trackedDirty: false, mergeInProgress: false, remotes: [], branches: ["work"] },
     data: {
       config: { version: 1, git: { protectedBranches: [] }, masters: { a: { path: "a.csv", primaryKey: ["id"] }, b: { path: "b.csv", primaryKey: ["id"] } } },
@@ -77,19 +77,17 @@ test("stale updates and updates from another project are rejected", () => {
 
 test("editing keeps last fetched Git metadata but marks it stale until a matching refresh", () => {
   const current = fixture();
-  current.changes = [{ kind: "addedMaster", masterId: "a" }];
   const patch = update(current, {});
   patch.protected = true;
   const edited = applyProjectUpdate(current, patch);
   assert.equal(edited.gitStale, true);
   assert.equal(edited.git.protected, true);
-  assert.equal(edited.changes, current.changes);
-  const state: RepositoryState = { root: edited.root, revision: edited.revision, git: { ...edited.git, trackedDirty: true }, changes: [], scriptChanges: ["gamemasterstudio/scripts/a.json"], changesError: null };
+  const state: RepositoryState = { root: edited.root, revision: edited.revision, git: { ...edited.git, trackedDirty: true } };
   const fresh = applyRepositoryState(edited, state)!;
   assert.equal(fresh.gitStale, false);
   assert.equal(fresh.git.trackedDirty, true);
   assert.equal(fresh.data, edited.data);
-  assert.deepEqual(fresh.scriptChanges, state.scriptChanges);
+  assert.equal(Object.hasOwn(fresh, "changes"), false);
   assert.equal(applyRepositoryState(edited, { ...state, revision: state.revision - 1 }), edited);
   assert.equal(applyRepositoryState(edited, { ...state, root: "/other" }), edited);
   assert.equal(applyRepositoryState(null, state), null);
@@ -101,4 +99,16 @@ test("a no-op edit does not invalidate fresh Git metadata or clear a pending ref
   patch.revision = current.revision;
   assert.equal(applyProjectUpdate(current, patch).gitStale, false);
   assert.equal(applyProjectUpdate({ ...current, gitStale: true }, patch).gitStale, true);
+});
+
+ test("reverting an unopened master advances metadata without retaining its rows", () => {
+  const current = fixture();
+  const master = current.data.masters.b.data!;
+  delete current.data.masters.b;
+  const next = applyProjectUpdate(current, update(current, {
+    b: { kind: "rows", rows: [[0, ["1", "reverted"]]], rowCount: 3, comments: master.comments, scripts: master.scripts!, scriptError: null, error: null },
+  }));
+  assert.equal(next.revision, current.revision + 1);
+  assert.deepEqual(Object.keys(next.data.masters), ["a"]);
+  assert.equal(next.data.masters.a, current.data.masters.a);
 });

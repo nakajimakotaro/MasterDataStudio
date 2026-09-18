@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,7 +12,6 @@ import {
   Layers3,
   History as HistoryIcon,
   LoaderCircle,
-  MessageSquare,
   Plus,
   Settings2,
   RefreshCw,
@@ -228,6 +227,16 @@ function Workspace({ project }: { project: Snapshot }) {
   const ids = Object.keys(project.data.config.masters);
   const editable = !!project.identity.name && !!project.identity.email && !project.git.protected && !project.git.mergeInProgress;
   const entry = masterId ? project.data.masters[masterId] : null;
+  const attemptedLoad = useRef("");
+  useEffect(() => {
+    const token = JSON.stringify([project.root, project.revision, masterId]);
+    if (entry) attemptedLoad.current = "";
+    const needsLoad = masterId ? !entry : Object.keys(project.data.masters).length > 0;
+    if (!busy && !project.merge && needsLoad && attemptedLoad.current !== token) {
+      attemptedLoad.current = token;
+      action.mutate({ command: "select_master", masterId });
+    }
+  }, [project.root, project.revision, project.merge, project.data.masters, masterId, entry, busy, action.mutate]);
   return (
     <div className="workspace">
       <header className="app-header">
@@ -257,7 +266,7 @@ function Workspace({ project }: { project: Snapshot }) {
         <button disabled={busy} onClick={() => action.mutate({ command: "git_fetch" })} title="Fetch all / prune"><RefreshCw size={15} /> Fetch</button>
         <button disabled={busy || !project.git.upstream || (!project.gitStale && project.git.trackedDirty) || project.git.mergeInProgress} onClick={() => action.mutate({ command: "git_update" })}>Update{project.git.behind ? ` (${project.git.behind})` : ""}</button>
         <button disabled={busy || (!project.gitStale && project.git.trackedDirty) || project.git.mergeInProgress || project.git.protected} onClick={() => set({ dialog: "merge" })}>Merge</button>
-        <button disabled={busy || project.git.mergeInProgress} onClick={() => set({ dialog: "changes" })}><GitCommit size={15} /> Changes {!project.gitStale && <strong>{project.changes.length + (project.scriptChanges?.length ?? 0)}</strong>}</button>
+        <button disabled={busy || project.git.mergeInProgress} onClick={() => set({ dialog: "changes" })}><GitCommit size={15} /> Changes</button>
         <span className="remote-status" title={project.git.upstream ?? "upstream 未設定"}>{project.git.upstream ?? "upstream 未設定"} · ↑ {project.git.ahead} ↓ {project.git.behind}</span>
         <button disabled={busy || project.git.mergeInProgress || (!project.git.upstream && !project.git.remotes.includes("origin"))} onClick={() => action.mutate({ command: "git_push" })}>Push</button>
         <button
@@ -275,6 +284,7 @@ function Workspace({ project }: { project: Snapshot }) {
           <div className="workspace-label">WORKSPACE</div>
           <button
             className={`nav-item ${!masterId ? "active" : ""}`}
+            disabled={busy}
             onClick={() => selectMaster(null)}
           >
             <Grid2X2 size={17} />
@@ -299,19 +309,11 @@ function Workspace({ project }: { project: Snapshot }) {
               <button
                 className={`nav-item ${masterId === id ? "active" : ""}`}
                 key={id}
+                disabled={busy}
                 onClick={() => selectMaster(id)}
               >
                 <Database size={16} />
                 <span>{id}</span>
-                {project.data.masters[id].error ? (
-                  <span className="error-dot" />
-                ) : (
-                  <small>
-                    {project.data.masters[
-                      id
-                    ].data?.table.rows.length.toLocaleString()}
-                  </small>
-                )}
               </button>
             ))}
           </nav>
@@ -366,6 +368,10 @@ function Workspace({ project }: { project: Snapshot }) {
                 </p>
               </div>
             )
+          ) : masterId ? (
+            <div className="empty-state" role="status">{busy ? "Master を読み込み中…" : "Master を読み込めませんでした。"}
+              {!busy && <button onClick={() => action.mutate({ command: "select_master", masterId })}>再試行</button>}
+            </div>
           ) : (
             <Dashboard project={project} />
           )}
@@ -379,21 +385,7 @@ function Workspace({ project }: { project: Snapshot }) {
 function Dashboard({ project }: { project: Snapshot }) {
   const { selectMaster, set } = useUI();
   const busy = useBusy();
-  const entries = Object.entries(project.data.masters);
-  const rows = entries.reduce(
-    (sum, [, e]) => sum + (e.data?.table.rows.length ?? 0),
-    0,
-  );
-  const comments = entries.reduce(
-    (sum, [, e]) =>
-      sum +
-      (e.data
-        ? Number(!!e.data.comments.table) +
-          e.data.comments.rows.length +
-          e.data.comments.cells.length
-        : 0),
-    0,
-  );
+  const entries = Object.entries(project.data.config.masters);
   return (
     <div className="dashboard">
       <div className="breadcrumb">
@@ -422,16 +414,6 @@ function Dashboard({ project }: { project: Snapshot }) {
           <span>Masters</span>
           <strong>{entries.length.toLocaleString()}</strong>
         </div>
-        <div>
-          <Grid2X2 size={20} />
-          <span>Total rows</span>
-          <strong>{rows.toLocaleString()}</strong>
-        </div>
-        <div>
-          <MessageSquare size={20} />
-          <span>Comments</span>
-          <strong>{comments.toLocaleString()}</strong>
-        </div>
       </div>
       <div className="section-heading">
         <h2>Masters</h2>
@@ -442,13 +424,13 @@ function Dashboard({ project }: { project: Snapshot }) {
           <div className="master-list-head">
             <span>MASTER / PATH</span>
             <span>PRIMARY KEY</span>
-            <span>ROWS</span>
-            <span>STATUS</span>
+            <span />
           </div>
-          {entries.map(([id, entry]) => (
+          {entries.map(([id, definition]) => (
             <button
               className="master-list-row"
               key={id}
+              disabled={busy}
               onClick={() => selectMaster(id)}
             >
               <span className="master-name">
@@ -457,21 +439,15 @@ function Dashboard({ project }: { project: Snapshot }) {
                 </span>
                 <span>
                   <strong>{id}</strong>
-                  <small>{project.data.config.masters[id].path}</small>
+                  <small>{definition.path}</small>
                 </span>
               </span>
               <span className="pk-tags">
-                {project.data.config.masters[id].primaryKey.map((k) => (
+                {definition.primaryKey.map((k) => (
                   <code key={k}>{k}</code>
                 ))}
               </span>
-              <span>
-                {entry.data?.table.rows.length.toLocaleString() ?? "—"}
-              </span>
-              <span className={`badge ${entry.error ? "danger" : ""}`}>
-                {entry.error ? "読み込みエラー" : project.gitStale ? "保存済み" : project.changes.some(c => c.masterId === id) ? "Modified" : "Ready"}
-                <ArrowRight size={14} />
-              </span>
+              <span><ArrowRight size={14} /></span>
             </button>
           ))}
         </div>
