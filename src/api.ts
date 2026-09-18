@@ -12,6 +12,7 @@ import type { ChangeFilter, ChangeReviewData, HistoryChangesPage, HistoryPage, O
 
 export const desktop = isTauri();
 type Request =
+  | { command: "clone_project"; url: string; path: string; safeMode?: boolean }
   | { command: "open_project"; path: string; initialize: boolean; safeMode?: boolean }
   | { command: "edit_project"; operation: Operation }
   | { command: "close_project" }
@@ -68,7 +69,7 @@ export function useRepositoryAction() {
         : await invoke<Snapshot | null>(command, { ...args, revision });
       const errors: string[] = [];
       if (snapshot && !snapshot.safeMode && !snapshot.merge && [
-        "open_project", "switch_branch", "git_update", "merge_branch", "complete_merge", "abort_merge",
+        "open_project", "clone_project", "switch_branch", "git_update", "merge_branch", "complete_merge", "abort_merge",
       ].includes(command)) {
         for (const [masterId, entry] of Object.entries(snapshot.data.masters)) {
           if (entry.data?.scriptError) {
@@ -92,6 +93,7 @@ export function useRepositoryAction() {
       useUI.getState().set({ error });
       if (
         request.command === "open_project" ||
+        request.command === "clone_project" ||
         request.command === "close_project"
       ) {
         useUI.getState().selectMaster(null);
@@ -102,7 +104,7 @@ export function useRepositoryAction() {
       useUI.getState().set({ error: String(error) });
       // Git can change state before reporting an error (e.g. commit succeeds,
       // push fails, or a merge commit hook rejects). Refresh the Rust snapshot.
-      if (request.command !== "open_project" && request.command !== "close_project") {
+      if (request.command !== "open_project" && request.command !== "clone_project" && request.command !== "close_project") {
         try { client.setQueryData(["project"], await invoke<Snapshot>("get_project")); } catch { /* Preserve the original error. */ }
       }
     },

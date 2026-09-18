@@ -1,4 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -68,6 +69,10 @@ function Brand() {
 }
 
 function Launcher() {
+  const [showClone, setShowClone] = useState(false);
+  const [cloneUrl, setCloneUrl] = useState("");
+  const [clonePath, setClonePath] = useState("");
+  const [cloneSafeMode, setCloneSafeMode] = useState(false);
   const recent = useRecent();
   const action = useRepositoryAction();
   const busy = useBusy();
@@ -125,7 +130,37 @@ function Launcher() {
           <button disabled={busy || !desktop} onClick={() => void choose(true)}>
             <Plus size={18} /> Project を初期化
           </button>
+          <button disabled={busy || !desktop} onClick={() => setShowClone(!showClone)}>
+            <GitBranch size={18} /> Git URL からクローン
+          </button>
         </div>
+        {showClone && (
+          <form className="clone-form" onSubmit={(event) => {
+            event.preventDefault();
+            if (!busy && cloneUrl.trim() && clonePath) {
+              action.mutate({ command: "clone_project", url: cloneUrl.trim(), path: clonePath, safeMode: cloneSafeMode });
+            }
+          }}>
+            <label>Git URL
+              <input autoFocus required disabled={busy} value={cloneUrl} onChange={(event) => setCloneUrl(event.target.value)} placeholder="https://github.com/team/project.git" />
+            </label>
+            <label>保存先（空のフォルダ）
+              <input readOnly value={clonePath} placeholder="保存先フォルダを選択してください" />
+            </label>
+            <button type="button" disabled={busy} onClick={async () => {
+              try {
+                const path = await open({ directory: true, multiple: false, title: "クローン先の空フォルダを選択" });
+                if (typeof path === "string") setClonePath(path);
+              } catch (error) {
+                useUI.getState().set({ error: String(error) });
+              }
+            }}><FolderOpen size={16} /> 保存先を選択</button>
+            <label className="clone-safe-mode"><input type="checkbox" disabled={busy} checked={cloneSafeMode} onChange={(event) => setCloneSafeMode(event.target.checked)} /> Safe Mode で開く（スクリプトを実行しない）</label>
+            <button className="primary" disabled={busy || !cloneUrl.trim() || !clonePath} type="submit">
+              {busy ? <><LoaderCircle size={16} /> クローン中…</> : "クローンして開く"}
+            </button>
+          </form>
+        )}
         <p className="hint">
           初期化は選択したフォルダに Project Config を作成します。
           <br />

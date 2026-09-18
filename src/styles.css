@@ -202,9 +202,19 @@ button.icon-button {
 }
 .launcher-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   margin: 28px 0 13px;
 }
+.clone-form {
+  display: grid;
+  gap: 12px;
+  max-width: 600px;
+  margin-top: 20px;
+}
+.clone-form label { display: grid; gap: 6px; }
+.clone-form .clone-safe-mode { display: flex; align-items: center; }
+.clone-form button { justify-self: start; }
 .launcher-actions button {
   height: 46px;
   padding: 0 18px;

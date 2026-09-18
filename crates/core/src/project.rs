@@ -403,6 +403,28 @@ impl Project {
         })
     }
 
+    pub fn clone_repository(url: &str, path: &Path) -> Result<Self> {
+        let url = url.trim();
+        if url.is_empty() || url.starts_with('-') || url.contains(['\0', '\n', '\r']) {
+            return Err("Git URL を入力してください。".into());
+        }
+        if !path.is_dir() {
+            return Err("クローン先に既存の空フォルダを選択してください。".into());
+        }
+        let root = fs::canonicalize(path).map_err(|e| e.to_string())?;
+        if fs::read_dir(&root)
+            .map_err(|e| e.to_string())?
+            .next()
+            .is_some()
+        {
+            return Err("クローン先のフォルダは空である必要があります。".into());
+        }
+        git(&root, &["clone", "--", url, "."])?;
+        Self::open(&root).map_err(|error| {
+            format!("クローンは完了しましたが、Project を開けませんでした。ファイルは {} に保存されています。\n{error}", root.display())
+        })
+    }
+
     pub fn initialize(path: &Path) -> Result<Self> {
         if !path.is_dir() {
             return Err("既存のフォルダを選択してください。".into());

@@ -74,6 +74,26 @@ fn open_project(
 }
 
 #[tauri::command(async)]
+fn clone_project(
+    url: String,
+    path: String,
+    safe_mode: Option<bool>,
+    app: tauri::AppHandle,
+    state: State<AppState>,
+) -> Result<Snapshot, String> {
+    let mut current = state.0.lock().map_err(|e| e.to_string())?;
+    let mut project = Project::clone_repository(&url, Path::new(&path))?;
+    project.safe_mode = safe_mode.unwrap_or(false);
+    let snapshot = project.snapshot();
+    if let Err(error) = remember(&app, &snapshot.root) {
+        eprintln!("Recent projects: {error}");
+    }
+    *state.1.lock().map_err(|e| e.to_string())? = None;
+    *current = Some(project);
+    Ok(snapshot)
+}
+
+#[tauri::command(async)]
 fn close_project(state: State<AppState>) -> Result<(), String> {
     *state.0.lock().map_err(|e| e.to_string())? = None;
     *state.1.lock().map_err(|e| e.to_string())? = None;
@@ -264,6 +284,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             recent_projects,
             open_project,
+            clone_project,
             close_project,
             get_project,
             edit_project,
