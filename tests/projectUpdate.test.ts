@@ -54,6 +54,19 @@ test("row patches handle canonical reordering, insertion and truncation", () => 
   }
 });
 
+test("metadata-only updates retain the table and equivalent config references", () => {
+  const current = fixture();
+  const master = current.data.masters.a.data!;
+  const patch = update(current, {
+    a: { kind: "rows", rows: [], rowCount: 3, comments: master.comments, scripts: master.scripts!, scriptError: "metadata error", error: null },
+  });
+  patch.data.config = structuredClone(current.data.config);
+  const next = applyProjectUpdate(current, patch);
+  assert.equal(next.data.config, current.data.config);
+  assert.equal(next.data.masters.a.data!.table, master.table);
+  assert.equal(next.data.masters.a.data!.scriptError, "metadata error");
+});
+
 test("master replacements, removal and config-only changes apply together", () => {
   const current = fixture();
   const replacement = { data: null, error: "CSV error" };

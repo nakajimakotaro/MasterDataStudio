@@ -17,12 +17,13 @@ export function applyProjectUpdate(current: Snapshot, update: ProjectUpdate): Sn
     } else {
       const previous = Object.hasOwn(masters, id) ? masters[id].data : null;
       if (!previous) continue; // An unopened Master has no editor data to update.
-      const rows = previous.table.rows.slice(0, change.rowCount);
+      const rows = change.rows.length || previous.table.rows.length !== change.rowCount
+        ? previous.table.rows.slice(0, change.rowCount) : previous.table.rows;
       for (const [index, row] of change.rows) rows[index] = row;
       entry = {
         error: change.error,
         data: {
-          table: { columns: previous.table.columns, rows },
+          table: rows === previous.table.rows ? previous.table : { columns: previous.table.columns, rows },
           comments: change.comments,
           scripts: change.scripts,
           scriptError: change.scriptError,
@@ -36,7 +37,7 @@ export function applyProjectUpdate(current: Snapshot, update: ProjectUpdate): Sn
     revision: update.revision,
     git: { ...current.git, branch: update.branch, protected: update.protected },
     gitStale: current.gitStale || current.revision !== update.revision || current.git.branch !== update.branch,
-    data: { config: update.data.config, masters },
+    data: { config: JSON.stringify(current.data.config) === JSON.stringify(update.data.config) ? current.data.config : update.data.config, masters },
   };
 }
 

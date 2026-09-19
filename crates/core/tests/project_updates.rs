@@ -494,3 +494,53 @@ fn settings_review_and_script_discovery_do_not_require_csv_data() {
         gamemasterstudio_core::project::SemanticChange::ProjectConfig { .. }
     ));
 }
+
+// Run explicitly in release mode to measure the user's large-master workload.
+#[test]
+#[ignore]
+fn large_master_edit_timing() {
+    use std::time::Instant;
+    let (dir, mut p) = fixture(0);
+    let columns = std::iter::once("id".to_string())
+        .chain(std::iter::once("value".to_string()))
+        .chain((2..30).map(|i| format!("column{i}")))
+        .collect::<Vec<_>>();
+    let mut writer = csv::Writer::from_path(dir.path().join("a.csv")).unwrap();
+    writer.write_record(&columns).unwrap();
+    for i in 0..333_332 {
+        let mut row = vec!["12345678".to_string(); 30];
+        row[0] = format!("{i:06}");
+        writer.write_record(&row).unwrap();
+    }
+    writer.flush().unwrap();
+    drop(writer);
+    let revision = p.snapshot().revision;
+    let start = Instant::now();
+    let preview = p.preview_scripts(edit(), revision).unwrap();
+    eprintln!("333,332 x 30 preview: {:?}", start.elapsed());
+    assert!(preview.targets.is_empty());
+    let start = Instant::now();
+    let update = p.apply_calculated_update(edit(), vec![], revision).unwrap();
+    eprintln!("333,332 x 30 save: {:?}", start.elapsed());
+    match update.data.masters["a"].as_ref().unwrap() {
+        MasterUpdate::Rows {
+            rows, row_count, ..
+        } => {
+            assert_eq!(*row_count, 333_332);
+            assert_eq!(
+                rows,
+                &vec![(0, {
+                    let mut row = vec!["12345678".to_string(); 30];
+                    row[0] = "000000".into();
+                    row[1] = "edited".into();
+                    row
+                })]
+            );
+        }
+        _ => panic!("expected one changed row"),
+    }
+    let table = p.master("a", update.revision).unwrap().data.unwrap().table;
+    assert_eq!(table.rows.len(), 333_332);
+    assert_eq!(table.rows[0][1], "edited");
+    assert_eq!(table.rows[333_331][29], "12345678");
+}

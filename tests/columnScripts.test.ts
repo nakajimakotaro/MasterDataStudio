@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evaluateScripts } from "../src/columnScripts.ts";
-import type { PreparedEdit } from "../src/types.ts";
+import { evaluateScripts, needsScriptPreview } from "../src/columnScripts.ts";
+import type { Operation, PreparedEdit, Snapshot } from "../src/types.ts";
 
 function prepared(script = "return Number(row.attack) * 2;"): PreparedEdit {
   return {
@@ -22,6 +22,20 @@ function prepared(script = "return Number(row.attack) * 2;"): PreparedEdit {
     ],
   };
 }
+
+test("only known script-free cell edits and Safe Mode bypass preview", () => {
+  const snapshot = { data: prepared().data } as Snapshot;
+  const operation: Operation = { type: "editCells", masterId: "enemy", edits: [{ primaryKey: ["1", "a"], column: "attack", value: "30" }] };
+  assert.equal(needsScriptPreview(snapshot, operation), true);
+  snapshot.data.masters.enemy.data!.scripts!.columns = [];
+  assert.equal(needsScriptPreview(snapshot, operation), false);
+  snapshot.data.masters.enemy.data!.scriptError = "invalid metadata";
+  assert.equal(needsScriptPreview(snapshot, operation), true);
+  delete snapshot.data.masters.enemy;
+  assert.equal(needsScriptPreview(snapshot, operation), true);
+  assert.equal(needsScriptPreview(snapshot, { type: "setScript", masterId: "enemy", column: "power", script: "return (" }), true);
+  assert.equal(needsScriptPreview({ ...snapshot, safeMode: true }, operation), false);
+});
 
 test("scripts see only same-row ordinary strings, including arbitrary column names", () => {
   const p = prepared(`

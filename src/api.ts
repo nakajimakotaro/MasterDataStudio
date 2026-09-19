@@ -1,4 +1,4 @@
-import { evaluateScripts } from "./columnScripts";
+import { evaluateScripts, needsScriptPreview } from "./columnScripts";
 import { applyProjectUpdate, applyRepositoryState } from "./projectUpdate";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
@@ -34,6 +34,8 @@ export function useProject() {
     queryFn: () => invoke<Snapshot>("get_project"),
     enabled: false,
     initialData: null,
+    // Row patches already preserve unchanged data; deep comparison walks every row.
+    structuralSharing: false,
   });
 }
 
@@ -60,8 +62,9 @@ export function useRepositoryAction() {
       }
       const revision = "revision" in request ? request.revision : current?.revision ?? 0;
       const edit = async (operation: Operation, snapshot: Snapshot) => {
-        const prepared = await invoke<PreparedEdit>("preview_edit", { operation, revision: snapshot.revision });
-        const calculated = evaluateScripts(prepared, snapshot.safeMode, operation);
+        const calculated = needsScriptPreview(snapshot, operation)
+          ? evaluateScripts(await invoke<PreparedEdit>("preview_edit", { operation, revision: snapshot.revision }), snapshot.safeMode, operation)
+          : [];
         const update = await invoke<ProjectUpdate>("edit_project", { operation, calculated, revision: snapshot.revision });
         return applyProjectUpdate(snapshot, update);
       };

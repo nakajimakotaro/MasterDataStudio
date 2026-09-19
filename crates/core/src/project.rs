@@ -952,11 +952,10 @@ impl Project {
                             .into(),
                     );
                 }
-                let mut table = Table {
+                let table = Table {
                     columns,
                     rows: vec![],
                 };
-                table.canonicalize(def)?;
                 next.masters.insert(
                     master_id,
                     MasterEntry {
@@ -990,27 +989,21 @@ impl Project {
                 if def.path != old_path && storage::safe_path(&self.root, &def.path)?.exists() {
                     return Err("保存先に既存ファイルがあります。".into());
                 }
-                next.masters
-                    .get_mut(&master_id)
-                    .unwrap()
-                    .data
-                    .as_mut()
-                    .unwrap()
-                    .table
-                    .canonicalize(def)?;
             }
             Operation::EditCells { master_id, edits } => {
                 let (master, def) = get_master(&mut next, &master_id)?;
                 // Resolve every target against the original keys. A fill can
                 // renumber rows into keys vacated by the same operation.
                 let indices = master.table.key_indices(def)?;
-                let original_rows: BTreeMap<_, _> = master
-                    .table
-                    .rows
+                let original_rows: BTreeMap<_, _> = edits
                     .iter()
-                    .enumerate()
-                    .map(|(i, row)| (Table::key(row, &indices), i))
-                    .collect();
+                    .map(|edit| {
+                        Ok((
+                            edit.primary_key.clone(),
+                            master.table.row_index(&edit.primary_key, def)?,
+                        ))
+                    })
+                    .collect::<Result<_>>()?;
                 let mut targets = vec![];
                 let mut changes_keys = false;
                 for edit in edits {
@@ -1100,12 +1093,13 @@ impl Project {
                 for key in &primary_keys {
                     master.table.row_index(key, def)?;
                 }
+                master.comments.delete_rows(&primary_keys);
+                let primary_keys: BTreeSet<_> = primary_keys.into_iter().collect();
                 let indices = master.table.key_indices(def)?;
                 master
                     .table
                     .rows
                     .retain(|r| !primary_keys.contains(&Table::key(r, &indices)));
-                master.comments.delete_rows(&primary_keys);
                 for script in &mut master.scripts.columns {
                     script.overrides.retain(|k| !primary_keys.contains(k));
                 }
@@ -2036,13 +2030,6 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
             }
         }
     }
-    for (id, e) in &mut next.masters {
-        if let Some(m) = &mut e.data {
-            let d = &next.config.masters[id];
-            m.table.canonicalize(d)?;
-            m.comments.validate(&m.table, d)?;
-        }
-    }
     Ok(())
 }
 
@@ -2080,7 +2067,7 @@ fn files_where(
         }
         if let Some(master) = &entry.data {
             let def = &data.config.masters[id];
-            files.insert(def.path.clone(), master.table.serialize(def)?);
+            files.insert(def.path.clone(), master.table.serialize_canonical()?);
             if let Some(bytes) = master.scripts.serialize()? {
                 files.insert(format!("gamemasterstudio/scripts/{id}.json"), bytes);
             }

@@ -34,8 +34,6 @@ impl Scripts {
         if self.version != 1 {
             return Err("Unsupported Script metadata version".into());
         }
-        let indices = table.key_indices(def)?;
-        let keys: BTreeSet<_> = table.rows.iter().map(|r| Table::key(r, &indices)).collect();
         let mut columns = BTreeSet::new();
         for entry in &mut self.columns {
             if !table.columns.contains(&entry.column) || def.primary_key.contains(&entry.column) {
@@ -49,7 +47,7 @@ impl Scripts {
             }
             let mut overrides = BTreeSet::new();
             for key in &entry.overrides {
-                if key.len() != def.primary_key.len() || !keys.contains(key) {
+                if table.row_index(key, def).is_err() {
                     return Err(format!("Invalid Script Override: {} {key:?}", entry.column));
                 }
                 if !overrides.insert(key.clone()) {
@@ -198,6 +196,9 @@ pub fn targets(
             "Master: {id}\nScript metadata: {error}\nSafe Mode で修正してください。"
         ));
     }
+    if master.scripts.columns.is_empty() {
+        return Ok(vec![]);
+    }
     let indices = master.table.key_indices(&next.config.masters[id])?;
     let mut targets = vec![];
     for row in &master.table.rows {
@@ -206,7 +207,9 @@ pub fn targets(
             continue;
         }
         for script in &master.scripts.columns {
-            if column.is_some_and(|c| c != script.column) || script.overrides.contains(&key) {
+            if column.is_some_and(|c| c != script.column)
+                || script.overrides.binary_search(&key).is_ok()
+            {
                 continue;
             }
             targets.push(ScriptTarget {

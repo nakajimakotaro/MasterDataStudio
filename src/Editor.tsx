@@ -25,7 +25,6 @@ import { useBusy, useRepositoryAction } from "./api";
 import { useUI, type DraftRow } from "./store";
 import {
   keyId,
-  rowKey,
   type CellEdit,
   type Comment,
   type CommentTarget,
@@ -60,6 +59,7 @@ const editorGridOptions: Pick<GridOptions<GridRow>,
     headerTooltip: "検索・フィルターに一致する全行を選択 / 解除",
   },
   postSortRows: ({ nodes }) => {
+    if (!nodes.some(node => node.data?.draft)) return;
     // Keep saved rows sorted normally, and append drafts in creation order.
     nodes.sort((a, b) => {
       const aDraft = !!a.data?.draft;
@@ -86,7 +86,7 @@ export function Editor({
   const [api, setApi] = useState<GridApi<GridRow> | null>(null);
   const [visibleRows, setVisibleRows] = useState(master.table.rows.length);
   const [fillValue, setFillValue] = useState<string | null>(null);
-  const [rangeCount, setRangeCount] = useState(0);
+  const [hasRange, setHasRange] = useState(false);
   const newRowKeys = useRef<string[]>([]);
   const fillEdits = useRef(new CellEditBatch());
   const grid = useRef<AgGridReact<GridRow>>(null);
@@ -113,10 +113,22 @@ export function Editor({
     const state = useUI.getState();
     state.set({ drafts: { ...state.drafts, [draftScope]: rows } });
   }, [draftScope]);
+  const gridRow = useMemo(() => {
+    const indices = def.primaryKey.map(c => master.table.columns.indexOf(c));
+    const cache = new WeakMap<string[], GridRow>();
+    return (values: string[]): GridRow => {
+      let row = cache.get(values);
+      if (!row) {
+        row = { key: indices.map(i => values[i]), values };
+        cache.set(values, row);
+      }
+      return row;
+    };
+  }, [master.table.columns, def.primaryKey]);
   const rowData = useMemo<GridRow[]>(() => [
-    ...master.table.rows.map((values) => ({ key: rowKey(values, master, def), values })),
+    ...master.table.rows.map(gridRow),
     ...drafts.map((row) => ({ key: row.key, values: master.table.columns.map(c => row.cells[c] ?? ""), draft: true })),
-  ], [master.table, def, drafts]);
+  ], [master.table, gridRow, drafts]);
   const addRows = (sources: Pick<GridRow, "values">[] = [{ values: [] }]) => {
     if (!editable || !sources.length) return;
     const added = sources.map((source) => ({
@@ -148,12 +160,15 @@ export function Editor({
   const edit = useCallback((edits: CellEdit[]) => {
     if (!editable || !edits.length) return;
     const isDraft = (e: CellEdit) => drafts.some(row => keyId(row.key) === keyId(e.primaryKey));
-    const updateDrafts = () => setDrafts(drafts.map(row => {
-      const cells = { ...row.cells };
-      for (const e of edits) if (keyId(e.primaryKey) === keyId(row.key)) cells[e.column] = e.value;
-      return { ...row, cells };
-    }));
     const savedEdits = edits.filter(e => !isDraft(e));
+    const updateDrafts = () => {
+      if (savedEdits.length === edits.length) return;
+      setDrafts(drafts.map(row => {
+        const cells = { ...row.cells };
+        for (const e of edits) if (keyId(e.primaryKey) === keyId(row.key)) cells[e.column] = e.value;
+        return { ...row, cells };
+      }));
+    };
     if (savedEdits.length) action.mutate({
       command: "edit_project",
       operation: { type: "editCells", masterId, edits: savedEdits },
@@ -337,21 +352,6 @@ export function Editor({
     ];
   };
 
-  useEffect(() => {
-    const keys = new Set(rowData.map((row) => keyId(row.key)));
-    const state = useUI.getState();
-    const selectedKeys = state.selectedKeys.filter((key) =>
-      keys.has(keyId(key)),
-    );
-    const cell =
-      state.cell &&
-      keys.has(keyId(state.cell.primaryKey)) &&
-      master.table.columns.includes(state.cell.column)
-        ? state.cell
-        : null;
-    state.set({ selectedKeys, cell });
-  }, [rowData, master.table.columns]);
-
   return (
     <div className="editor">
       <div className="editor-heading">
@@ -436,7 +436,7 @@ export function Editor({
         </div>
         <div className="toolbar-group">
           <button
-            disabled={!editable || !rangeCount}
+            disabled={!editable || !hasRange}
             title="空文字にする"
             aria-label="空文字にする"
             onClick={() => edit(selectionEdits(""))}
@@ -444,7 +444,7 @@ export function Editor({
             <Eraser size={16} />
           </button>
           <button
-            disabled={!editable || !rangeCount}
+            disabled={!editable || !hasRange}
             onClick={() => setFillValue("")}
           >
             選択範囲を埋める
@@ -551,6 +551,13 @@ export function Editor({
               quickFilterText={ui.search}
               processDataFromClipboard={paste}
               onGridReady={(e) => setApi(e.api)}
+              onRowDataUpdated={({ api }) => {
+                const state = useUI.getState();
+                state.set({
+                  selectedKeys: state.selectedKeys.filter(key => api.getRowNode(keyId(key))),
+                  cell: state.cell && api.getRowNode(keyId(state.cell.primaryKey)) && master.table.columns.includes(state.cell.column) ? state.cell : null,
+                });
+              }}
               onModelUpdated={(e) => {
                 setVisibleRows(e.api.getDisplayedRowCount());
                 if (!newRowKeys.current.length) return;
@@ -566,9 +573,9 @@ export function Editor({
                 e.api.ensureNodeVisible(node, "bottom");
                 if (node.rowIndex !== null) e.api.setFocusedCell(node.rowIndex, `data:${def.primaryKey[0]}`);
               }}
-              onCellSelectionChanged={() =>
-                setRangeCount(selectionEdits("").length)
-              }
+              onCellSelectionChanged={() => setHasRange(!!api?.getCellRanges()?.some(range =>
+                range.startRow && range.endRow && range.columns.some(col => master.table.columns.includes(columnName(col.getColId()))),
+              ))}
               onSelectionChanged={(e) =>
                 ui.set({
                   selectedKeys: e.api.getSelectedRows().map((r) => r.key),
@@ -620,7 +627,7 @@ export function Editor({
             masterId={masterId}
             master={master}
             def={def}
-            draft={rowData.find(row => row.draft && keyId(row.key) === keyId(ui.cell?.primaryKey ?? ui.selectedKeys[0] ?? []))}
+            row={api?.getRowNode(keyId(ui.cell?.primaryKey ?? (ui.selectedKeys.length === 1 ? ui.selectedKeys[0] : [])))?.data}
             editable={editable}
           />
         )}
@@ -633,24 +640,20 @@ function Inspector({
   masterId,
   master,
   def,
-  draft,
+  row,
   editable,
 }: {
   masterId: string;
   master: Master;
   def: Definition;
-  draft?: GridRow;
+  row?: GridRow;
   editable: boolean;
 }) {
   const ui = useUI();
   const key =
     ui.cell?.primaryKey ??
     (ui.selectedKeys.length === 1 ? ui.selectedKeys[0] : null);
-  const row = draft?.values ?? (key
-    ? master.table.rows.find(
-        (r) => keyId(rowKey(r, master, def)) === keyId(key),
-      )
-    : null);
+  const draft = row?.draft;
   const column = ui.cell?.column;
   const rowComment = master.comments.rows.find(
     (c) => keyId(c.primaryKey) === keyId(key ?? []),
@@ -672,7 +675,7 @@ function Inspector({
             {def.primaryKey.map((c, i) => (
               <div key={c}>
                 <span>{c}</span>
-                <code>{draft ? draft.values[master.table.columns.indexOf(c)] || "未入力" : key[i]}</code>
+                <code>{draft ? row.values[master.table.columns.indexOf(c)] || "未入力" : key[i]}</code>
               </div>
             ))}
           </div>
@@ -681,7 +684,7 @@ function Inspector({
           <div className="value-details">
             <label>{column}</label>
             <pre>
-              {row[master.table.columns.indexOf(column)] || (
+              {row.values[master.table.columns.indexOf(column)] || (
                 <span className="empty-value">Empty string</span>
               )}
             </pre>

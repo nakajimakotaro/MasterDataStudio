@@ -1,4 +1,11 @@
-import type { CalculatedCell, PreparedEdit, Operation } from "./types";
+import type { CalculatedCell, PreparedEdit, Operation, Snapshot } from "./types";
+
+export function needsScriptPreview(snapshot: Snapshot, operation: Operation): boolean {
+  if (snapshot.safeMode) return false;
+  const master = operation.type === "editCells" ? snapshot.data.masters[operation.masterId]?.data : null;
+  // Rust still validates the saved metadata and rejects missing Script results.
+  return !master || !!master.scriptError || !!master.scripts?.columns.length;
+}
 
 /** Runs only the targets approved by Rust, against snapshots of ordinary cells. */
 export function evaluateScripts(prepared: PreparedEdit, safeMode = false, operation?: Operation): CalculatedCell[] {

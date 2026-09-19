@@ -205,6 +205,7 @@ impl Comments {
     }
 
     pub fn delete_rows(&mut self, keys: &[PrimaryKey]) {
+        let keys: BTreeSet<_> = keys.iter().collect();
         self.rows.retain(|r| !keys.contains(&r.primary_key));
         self.cells.retain(|c| !keys.contains(&c.primary_key));
     }

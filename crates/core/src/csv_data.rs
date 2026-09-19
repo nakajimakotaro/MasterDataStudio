@@ -45,23 +45,36 @@ impl Table {
         if indices.is_empty() {
             return Err("Primary Key が必要です。".into());
         }
-        let mut keys = BTreeSet::new();
         for row in &mut self.rows {
             if row.len() != self.columns.len() {
                 return Err("CSV の Column 数が一致しません。".into());
             }
             for cell in row.iter_mut() {
-                *cell = lf(cell);
+                if cell.contains('\r') {
+                    *cell = lf(cell);
+                }
             }
-            let key = Self::key(row, &indices);
-            if key.iter().any(String::is_empty) {
+            if indices.iter().any(|&i| row[i].is_empty()) {
                 return Err("Primary Key に空文字は使用できません。".into());
             }
-            if !keys.insert(key.clone()) {
-                return Err(format!("Primary Key が重複しています: {key:?}"));
-            }
         }
-        self.rows.sort_by_cached_key(|row| Self::key(row, &indices));
+        let compare = |a: &Vec<String>, b: &Vec<String>| {
+            indices
+                .iter()
+                .map(|&i| &a[i])
+                .cmp(indices.iter().map(|&i| &b[i]))
+        };
+        self.rows.sort_by(compare);
+        if let Some(pair) = self
+            .rows
+            .windows(2)
+            .find(|pair| compare(&pair[0], &pair[1]).is_eq())
+        {
+            return Err(format!(
+                "Primary Key が重複しています: {:?}",
+                Self::key(&pair[0], &indices)
+            ));
+        }
         Ok(())
     }
 
@@ -96,6 +109,11 @@ impl Table {
     pub fn serialize(&self, def: &MasterDefinition) -> Result<Vec<u8>> {
         let mut table = self.clone();
         table.canonicalize(def)?;
+        table.serialize_canonical()
+    }
+
+    /// Internal persistence has already validated and canonicalized the table.
+    pub(crate) fn serialize_canonical(&self) -> Result<Vec<u8>> {
         let mut writer = csv::WriterBuilder::new()
             .delimiter(b',')
             .terminator(csv::Terminator::Any(b'\n'))
@@ -103,19 +121,19 @@ impl Table {
             .double_quote(true)
             .from_writer(vec![]);
         writer
-            .write_record(&table.columns)
+            .write_record(&self.columns)
             .map_err(|e| e.to_string())?;
-        for row in &table.rows {
+        for row in &self.rows {
             writer.write_record(row).map_err(|e| e.to_string())?;
         }
         writer.into_inner().map_err(|e| e.to_string())
     }
 
+    /// Look up a key in a table ordered by parse() or canonicalize().
     pub fn row_index(&self, key: &PrimaryKey, def: &MasterDefinition) -> Result<usize> {
         let indices = self.key_indices(def)?;
         self.rows
-            .iter()
-            .position(|r| Self::key(r, &indices) == *key)
-            .ok_or_else(|| format!("Row がありません: {key:?}"))
+            .binary_search_by(|row| indices.iter().map(|&i| &row[i]).cmp(key.iter()))
+            .map_err(|_| format!("Row がありません: {key:?}"))
     }
 }
