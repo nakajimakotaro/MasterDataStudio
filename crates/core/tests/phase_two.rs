@@ -23,6 +23,12 @@ fn fixture() -> (tempfile::TempDir, Project) {
             columns: vec!["id".into(), "hp".into()],
         },
     );
+    apply(
+        &mut project,
+        Operation::SetProtectedBranches {
+            patterns: vec!["main".into()],
+        },
+    );
     git(
         dir.path(),
         &["add", "gamemasterstudio/project.yaml", "masters/enemy.csv"],

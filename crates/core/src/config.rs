@@ -11,18 +11,10 @@ pub struct MasterDefinition {
     pub primary_key: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GitConfig {
     pub protected_branches: Vec<String>,
-}
-
-impl Default for GitConfig {
-    fn default() -> Self {
-        Self {
-            protected_branches: vec!["main".into()],
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

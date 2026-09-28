@@ -558,15 +558,7 @@ impl Project {
                 "Project は初期化済みです。「Repository を開く」を使用してください。".into(),
             );
         }
-        let mut config = ProjectConfig::default();
-        if let Ok(default) = git(
-            &root,
-            &["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
-        ) {
-            if let Some(branch) = default.strip_prefix("origin/") {
-                config.git.protected_branches = vec![branch.into()];
-            }
-        }
+        let config = ProjectConfig::default();
         storage::atomic_write(&config_path, &config.serialize()?)?;
         Self::open(&root)
     }

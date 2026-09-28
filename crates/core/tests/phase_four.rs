@@ -1,6 +1,6 @@
 use gamemasterstudio_core::{
     comments::{Comment, CommentTarget, Comments, Identity},
-    config::{MasterDefinition, ProjectConfig, CONFIG_PATH},
+    config::{GitConfig, MasterDefinition, ProjectConfig, CONFIG_PATH},
     csv_data::Table,
     merge::{merge_comment, merge_project, Resolution},
     project::{git, Master, MasterEntry, Operation, Project, ProjectData, SemanticChange},
@@ -30,6 +30,9 @@ fn data() -> ProjectData {
     let table = Table::parse(b"id,wave,hp\n1,2,100\n1,10,200\n", &def).unwrap();
     ProjectData {
         config: ProjectConfig {
+            git: GitConfig {
+                protected_branches: vec!["main".into()],
+            },
             masters: BTreeMap::from([("enemy".into(), def)]),
             ..ProjectConfig::default()
         },
@@ -412,18 +415,27 @@ fn protected_settings_validate_autosave_review_and_commit() {
     }
 }
 #[test]
-fn unborn_protected_branch_requires_working_branch_and_identity_for_commit() {
+fn new_project_is_editable_on_unborn_branch_and_commit_requires_identity() {
     let dir = tempfile::tempdir().unwrap();
     let mut p = Project::initialize(dir.path()).unwrap();
     assert!(p.history(None, 0).unwrap().commits.is_empty());
+    assert!(!p.snapshot().git.protected);
     p.set_identity("Tester", "tester@example.com").unwrap();
     assert!(p
         .apply(
-            Operation::SetProtectedBranches { patterns: vec![] },
+            Operation::SetProtectedBranches {
+                patterns: vec!["main".into()]
+            },
             p.snapshot().revision
         )
         .is_err());
-    p.switch_branch("work", true).unwrap();
+    p.apply(
+        Operation::SetProtectedBranches {
+            patterns: vec!["release/*".into()],
+        },
+        p.snapshot().revision,
+    )
+    .unwrap();
     p.commit("Project initialized", false).unwrap();
     git(dir.path(), &["config", "user.name", ""]).unwrap();
     p = Project::open(dir.path()).unwrap();

@@ -28,11 +28,10 @@ VITE_AG_GRID_LICENSE_KEY=your-license-key
 ## 使い方
 
 1. 起動画面で **Repository を開く** を選択します。未設定の場合は **Project を初期化** で既存のフォルダを選択します。Git Repository がなければ `git init -b main` を実行します。既存 Repository のサブフォルダを選ぶと、その Repository のルートを使用します。
-2. `main` などの保護ブランチでは閲覧専用です。**Branch を作成** で Working Branch に切り替えます。初回 Commit 前も同じです。
-3. Git Identity が未設定の場合、**Project Settings** で名前とメールアドレスを設定します。Repository-local の Git config に保存します。未設定でも閲覧できます。
-4. **Master を作成** で ID、CSV path、Column 一覧、Primary Key を入力します。Columns / Primary Key はそれぞれ 1 行に 1 つ入力します。複合キーの順序は Primary Key の入力順です。
-5. Master を開き、セルのダブルクリックで編集します。Row 追加・複製・削除、Column 追加・削除はツールバーから操作します。
-6. セルを選択し、右側 Inspector から Table / Row / Cell Comment を編集します。入力欄を離れるか `⌘/Ctrl + Enter` で確定・自動保存します。本文を空白だけにすると削除します。
+2. Git Identity が未設定の場合、**Project Settings** で名前とメールアドレスを設定します。Repository-local の Git config に保存します。未設定でも閲覧できます。
+3. **Master を作成** で ID、CSV path、Column 一覧、Primary Key を入力します。Columns / Primary Key はそれぞれ 1 行に 1 つ入力します。複合キーの順序は Primary Key の入力順です。
+4. Master を開き、セルのダブルクリックで編集します。Row 追加・複製・削除、Column 追加・削除はツールバーから操作します。
+5. セルを選択し、右側 Inspector から Table / Row / Cell Comment を編集します。入力欄を離れるか `⌘/Ctrl + Enter` で確定・自動保存します。本文を空白だけにすると削除します。
 
 CSV とコメントは操作確定時に自動保存されます。Save ボタンはありません。
 
