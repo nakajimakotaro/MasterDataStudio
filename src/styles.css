@@ -864,9 +864,39 @@ button.icon-button {
   border-top: 5px solid #79a48a;
   border-left: 5px solid transparent;
 }
-.pk-header .ag-header-cell-text:before {
+.pk-header .ag-header-cell-text:before,
+.pk-header .column-header:before {
   content: "⌑";
   padding-right: 7px;
+  color: #8da596;
+}
+.column-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.pk-header .column-header:before {
+  padding-right: 0;
+}
+.column-type-badge {
+  flex: none;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #edf2ee;
+  color: #657c6d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.column-header-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.column-script-mark {
+  flex: none;
   color: #8da596;
 }
 .ag-selection-checkbox {
@@ -1234,6 +1264,27 @@ dialog::backdrop {
   font-size: 12px;
   line-height: 1.9;
 }
+.column-type-heading,
+.column-type-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 1fr);
+  align-items: center;
+  gap: 8px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid #e6ece8;
+}
+.column-type-heading {
+  font-size: 11px;
+  color: #657c6d;
+}
+.column-type-row code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.column-type-row small {
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
 .branch-results {
   padding: 4px;
 }
@@ -1551,6 +1602,10 @@ dialog:has(.history-panel) { width: min(1500px, 96vw); max-width: 96vw; }
 .script-metadata-error { padding: 12px 24px; color: #913e43; background: #fbe4e4; }
 .script-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2; line-height: 1.6; resize: vertical; }
 .ag-cell.script-cell { background-color: #edf4fa; }
+.ag-cell.type-error-cell { outline: 1px solid #c44747; outline-offset: -2px; padding-right: 26px; }
+.ag-cell.type-error-cell::before { content: "⚠"; position: absolute; right: 6px; color: #b93232; font-size: 13px; }
+.type-error-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 8px 16px; background: #fff3f3; color: #913e43; font-size: 12px; }
+.type-error-summary button { color: #913e43; border-color: #e6baba; }
 .ag-cell.script-override-cell { background-color: #fff0cf; box-shadow: inset 3px 0 #cb942a; }
 .recent-project-actions { display: flex; gap: 10px; align-items: stretch; }
 .recent-project-actions > button:first-child { flex: 1; min-width: 0; }

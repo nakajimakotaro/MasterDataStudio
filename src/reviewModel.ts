@@ -61,7 +61,7 @@ export function buildReviewTable(data: ChangeReviewData, masterId: string, onlyC
     if (change.kind === "comment" && change.target.kind === "cell") changedRows.add(keyId(change.target.primaryKey));
     if (change.kind === "cell") push(byCell, JSON.stringify([change.primaryKey, change.column]), change);
     else if (change.kind === "addedRow" || change.kind === "deletedRow") push(byRow, keyId(change.primaryKey), change);
-    else if (change.kind === "addedColumn" || change.kind === "deletedColumn") push(byColumn, change.column, change);
+    else if (change.kind === "columnType" || change.kind === "addedColumn" || change.kind === "deletedColumn") push(byColumn, change.column, change);
     else if (change.kind === "comment" && change.target.kind !== "table") {
       if (change.target.kind === "cell") push(byCell, JSON.stringify([change.target.primaryKey, change.target.column]), change);
       else push(byRow, keyId(change.target.primaryKey), change);

@@ -5,6 +5,7 @@ import {
   type GetContextMenuItems,
   type GridApi,
   type GridOptions,
+  type IHeaderParams,
   type ProcessDataFromClipboardParams,
 } from "ag-grid-community";
 import {
@@ -20,6 +21,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { masterColumn, masterGridTheme } from "./MasterGrid";
+import { columnType, columnTypeBadges, columnTypeError, columnTypeLabels } from "./columnTypes";
 import { CellEditBatch } from "./cellEditBatch";
 import { useBusy, useRepositoryAction } from "./api";
 import { useUI, type DraftRow } from "./store";
@@ -37,6 +39,16 @@ import {
 
 type GridRow = { key: PrimaryKey; values: string[]; draft?: boolean };
 const emptyDrafts: DraftRow[] = [];
+
+function ColumnHeader({ displayName, badge, script }: IHeaderParams & { badge: string; script: boolean }) {
+  return (
+    <span className="column-header">
+      <span className="column-type-badge">{badge}</span>
+      <span className="column-header-name">{displayName}</span>
+      {script && <span className="column-script-mark">ƒ</span>}
+    </span>
+  );
+}
 // Keep arbitrary user column names separate from AG Grid's internal column IDs.
 const columnName = (id: string) => (id.startsWith("data:") ? id.slice(5) : "");
 
@@ -130,6 +142,24 @@ export function Editor({
     ...master.table.rows.map(gridRow),
     ...drafts.map((row) => ({ key: row.key, values: master.table.columns.map(c => row.cells[c] ?? ""), draft: true })),
   ], [master.table, gridRow, drafts]);
+  const typeErrors = useMemo(() => rowData.flatMap(row => master.table.columns.flatMap((column, index) => {
+    const message = columnTypeError(row.values[index] ?? "", columnType(def, column));
+    return message ? [{ key: row.key, column, message }] : [];
+  })), [rowData, master.table.columns, def]);
+  const errorCursor = useRef(0);
+  const jumpToTypeError = () => {
+    if (!api || !typeErrors.length) return;
+    const error = typeErrors[errorCursor.current++ % typeErrors.length];
+    // A hidden error must become visible even when search/column filters are active.
+    ui.set({ search: "", inspector: true });
+    api.setGridOption("quickFilterText", "");
+    api.setFilterModel(null);
+    const node = api.getRowNode(keyId(error.key));
+    if (node?.rowIndex == null) return;
+    api.ensureIndexVisible(node.rowIndex, "middle");
+    api.ensureColumnVisible(`data:${error.column}`);
+    api.setFocusedCell(node.rowIndex, `data:${error.column}`);
+  };
   const addRows = (sources: Pick<GridRow, "values">[] = [{ values: [] }]) => {
     if (!editable || !sources.length) return;
     const added = sources.map((source) => ({
@@ -237,14 +267,24 @@ export function Editor({
     ];
     return order.map((column) => {
       const index = master.table.columns.indexOf(column);
+      const type = columnType(def, column);
       return {
         ...masterColumn<GridRow>(column, def.primaryKey),
         valueGetter: (p) => p.data?.values[index] ?? "",
         valueParser: (p) => String(p.newValue ?? ""),
-        headerName: `${column}${master.scripts?.columns.some(s => s.column === column) ? " ƒ" : ""}`,
+        headerComponentParams: {
+          innerHeaderComponent: ColumnHeader,
+          innerHeaderComponentParams: {
+            badge: columnTypeBadges[type],
+            script: !!master.scripts?.columns.some(s => s.column === column),
+          },
+        },
+        headerTooltip: `${column} · ${columnTypeLabels[type]}${def.primaryKey.includes(column) ? " · Primary Key" : ""}`,
         editable: (p) => editable && (!!p.data?.draft || !master.scripts?.columns.length || !def.primaryKey.includes(column)),
         mainMenuItems: (p) => [
           ...p.defaultItems,
+          { name: "カラムの型を設定", disabled: !editable,
+            action: () => useUI.getState().set({ dialog: "columnType", typeColumn: column }) },
           ...(!def.primaryKey.includes(column) ? [{
             name: master.scripts?.columns.some(s => s.column === column) ? "Edit Script" : "Set Script",
             action: () => useUI.getState().set({ dialog: "columnScript", scriptColumn: column }),
@@ -258,9 +298,11 @@ export function Editor({
           );
           const script = master.scripts?.columns.find(s => s.column === column);
           const override = script?.overrides.some(k => keyId(k) === keyId(p.data?.key ?? []));
-          return [override ? "Manual Override" : script ? "Column Script ƒ" : "", comment?.comment.body ?? String(p.value ?? "")].filter(Boolean).join("\n");
+          const error = columnTypeError(String(p.value ?? ""), type);
+          return [error ? `⚠ 型エラー: ${error}：${JSON.stringify(p.value)}` : "", override ? "Manual Override" : script ? "Column Script ƒ" : "", comment?.comment.body ?? String(p.value ?? "")].filter(Boolean).join("\n");
         },
         cellClassRules: {
+          "type-error-cell": (p) => !!columnTypeError(String(p.value ?? ""), type),
           "script-cell": () => !!master.scripts?.columns.some(s => s.column === column),
           "script-override-cell": (p) => !!master.scripts?.columns.find(s => s.column === column)?.overrides.some(k => keyId(k) === keyId(p.data?.key ?? [])),
           "commented-cell": (p) =>
@@ -383,6 +425,10 @@ export function Editor({
         </div>
       </div>
       {master.scriptError && <div className="script-metadata-error" role="alert">Script metadata: {master.scriptError} {project.safeMode ? "Column Script から修正できます。" : "Safe Mode で開いて修正してください。"}</div>}
+      {typeErrors.length > 0 && <div className="type-error-summary" role="status">
+        <button disabled={!api} onClick={jumpToTypeError} title="クリックで次のエラーへ移動（検索・フィルターを解除）">⚠ 型エラー {typeErrors.length.toLocaleString()}件 · 次のエラーへ</button>
+        <span>保存・コミットは可能です。セルにカーソルを合わせると理由を確認できます。</span>
+      </div>}
       <div className="editor-toolbar">
         <div className="toolbar-group">
           <button
@@ -432,6 +478,7 @@ export function Editor({
           </button>
         </div>
         <div className="toolbar-group">
+          <button disabled={busy} onClick={() => ui.set({ dialog: "columnType", typeColumn: null })}>カラムの型</button>
           <button disabled={busy || (!master.table.columns.some(c => !def.primaryKey.includes(c)) && !(project.safeMode && master.scriptError))} onClick={() => ui.set({ dialog: "columnScript", scriptColumn: null })}>ƒ Column Script</button>
           <button disabled={!editable || project.safeMode || !master.scripts?.columns.length || !!master.scriptError} title="Manual Override を維持して全 Script を再計算" onClick={() => action.mutate({ command: "edit_project", operation: { type: "recalculateScripts", masterId } })}>再計算</button>
         </div>
@@ -656,6 +703,7 @@ function Inspector({
     (ui.selectedKeys.length === 1 ? ui.selectedKeys[0] : null);
   const draft = row?.draft;
   const column = ui.cell?.column;
+  const typeError = column && row ? columnTypeError(row.values[master.table.columns.indexOf(column)] ?? "", columnType(def, column)) : null;
   const rowComment = master.comments.rows.find(
     (c) => keyId(c.primaryKey) === keyId(key ?? []),
   )?.comment;
@@ -683,7 +731,8 @@ function Inspector({
         )}
         {column && row && (
           <div className="value-details">
-            <label>{column}</label>
+            <label>{column} · {columnTypeLabels[columnType(def, column)]}</label>
+            {typeError && <p className="inline-error" role="status">⚠ {typeError}</p>}
             <pre>
               {row.values[master.table.columns.indexOf(column)] || (
                 <span className="empty-value">Empty string</span>

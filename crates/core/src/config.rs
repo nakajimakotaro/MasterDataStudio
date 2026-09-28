@@ -4,10 +4,41 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const CONFIG_PATH: &str = "gamemasterstudio/project.yaml";
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ColumnType {
+    String,
+    #[default]
+    Integer,
+    Decimal,
+    Boolean,
+    Date,
+    Time,
+    #[serde(rename = "datetime")]
+    DateTime,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MasterDefinition {
     pub primary_key: Vec<String>,
+    /// Omitted columns are integers. Values in CSV remain strings for every type.
+    #[serde(default)]
+    pub column_types: BTreeMap<String, ColumnType>,
+}
+
+impl MasterDefinition {
+    pub fn column_type(&self, column: &str) -> ColumnType {
+        self.column_types.get(column).copied().unwrap_or_default()
+    }
+
+    pub fn set_column_type(&mut self, column: String, column_type: ColumnType) {
+        if column_type == ColumnType::default() {
+            self.column_types.remove(&column);
+        } else {
+            self.column_types.insert(column, column_type);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -70,6 +101,9 @@ impl ProjectConfig {
         }
         let mut ids = BTreeSet::new();
         for (id, def) in &self.masters {
+            for column in def.column_types.keys() {
+                validate_column(column)?;
+            }
             if id.is_empty()
                 || !id.as_bytes()[0].is_ascii_alphanumeric()
                 || !id

@@ -1,3 +1,4 @@
+import { columnTypeLabels } from "./columnTypes";
 import type { SemanticChange } from "./types";
 
 export function describeChange(change: SemanticChange): string {
@@ -11,6 +12,8 @@ export function describeChange(change: SemanticChange): string {
     }
     case "projectConfig":
       return `Protected Branches: ${change.before?.protectedBranches.join(", ") ?? "（未設定）"} → ${change.after.protectedBranches.join(", ") || "（なし）"}`;
+    case "columnType":
+      return `${change.column} の型: ${columnTypeLabels[change.before]} → ${columnTypeLabels[change.after]}`;
     case "masterDefinition":
       return `Primary Key: ${JSON.stringify(change.before.primaryKey)} → ${JSON.stringify(change.after.primaryKey)}`;
     case "addedRow": case "deletedRow":

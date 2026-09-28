@@ -1,6 +1,9 @@
 use crate::{
     comments::{CommentTarget, Comments, Identity},
-    config::{csv_path, validate_column, GitConfig, MasterDefinition, ProjectConfig, CONFIG_PATH},
+    config::{
+        csv_path, validate_column, ColumnType, GitConfig, MasterDefinition, ProjectConfig,
+        CONFIG_PATH,
+    },
     csv_data::{PrimaryKey, Table},
     scripts::{CalculatedCell, ColumnScript, PreparedEdit, Scripts},
     storage::{self, FileChange},
@@ -198,6 +201,12 @@ pub enum SemanticChange {
     DeletedMaster {
         master_id: String,
     },
+    ColumnType {
+        master_id: String,
+        column: String,
+        before: ColumnType,
+        after: ColumnType,
+    },
     AddedColumn {
         master_id: String,
         column: String,
@@ -246,6 +255,10 @@ pub struct CellEdit {
 pub enum Operation {
     RevertChange {
         change: SemanticChange,
+    },
+    SetColumnTypes {
+        master_id: String,
+        column_types: BTreeMap<String, ColumnType>,
     },
     SetScript {
         master_id: String,
@@ -317,6 +330,7 @@ impl Operation {
                 SemanticChange::MasterDefinition { master_id, .. }
                 | SemanticChange::AddedMaster { master_id }
                 | SemanticChange::DeletedMaster { master_id }
+                | SemanticChange::ColumnType { master_id, .. }
                 | SemanticChange::AddedColumn { master_id, .. }
                 | SemanticChange::DeletedColumn { master_id, .. }
                 | SemanticChange::AddedRow { master_id, .. }
@@ -324,7 +338,8 @@ impl Operation {
                 | SemanticChange::Cell { master_id, .. }
                 | SemanticChange::Comment { master_id, .. } => Some(master_id),
             },
-            Self::SetScript { master_id, .. }
+            Self::SetColumnTypes { master_id, .. }
+            | Self::SetScript { master_id, .. }
             | Self::ReplaceScripts { master_id, .. }
             | Self::RemoveOverride { master_id, .. }
             | Self::RecalculateScripts { master_id }
@@ -850,6 +865,19 @@ impl Project {
                     .ok_or("HEAD に Project がありません。")?;
                 apply_revert(&mut next, &head, &change)?;
             }
+            Operation::SetColumnTypes {
+                master_id,
+                column_types,
+            } => {
+                let (master, _) = get_master(&mut next, &master_id)?;
+                for column in column_types.keys() {
+                    column_index(&master.table, column)?;
+                }
+                let def = next.config.masters.get_mut(&master_id).unwrap();
+                for (column, column_type) in column_types {
+                    def.set_column_type(column, column_type);
+                }
+            }
             Operation::SetScript {
                 master_id,
                 column,
@@ -933,9 +961,13 @@ impl Project {
                 if next.config.masters.contains_key(&master_id) {
                     return Err("Master ID が重複しています。".into());
                 }
-                next.config
-                    .masters
-                    .insert(master_id.clone(), MasterDefinition { primary_key });
+                next.config.masters.insert(
+                    master_id.clone(),
+                    MasterDefinition {
+                        primary_key,
+                        column_types: BTreeMap::new(),
+                    },
+                );
                 next.config.validate()?;
                 if storage::safe_path(&self.root, &csv_path(&master_id))?.exists()
                     || storage::safe_path(
@@ -978,9 +1010,7 @@ impl Project {
                 if !master.table.rows.is_empty() {
                     return Err("Row が存在する Master の Primary Key は変更できません。".into());
                 }
-                next.config
-                    .masters
-                    .insert(master_id.clone(), MasterDefinition { primary_key });
+                next.config.masters.get_mut(&master_id).unwrap().primary_key = primary_key;
                 next.config.validate()?;
             }
             Operation::EditCells { master_id, edits } => {
@@ -1120,6 +1150,12 @@ impl Project {
                 }
                 master.comments.cells.retain(|c| c.column != name);
                 master.scripts.columns.retain(|s| s.column != name);
+                next.config
+                    .masters
+                    .get_mut(&master_id)
+                    .unwrap()
+                    .column_types
+                    .remove(&name);
             }
             Operation::SetComment {
                 master_id,
@@ -1698,18 +1734,24 @@ fn diff_master(
     wd: &MasterDefinition,
     out: &mut Vec<SemanticChange>,
 ) -> Result<()> {
-    if bd != wd {
+    if bd.primary_key != wd.primary_key {
         out.push(SemanticChange::MasterDefinition {
             master_id: id.into(),
             before: bd.clone(),
             after: wd.clone(),
         });
         // No row identity mapping across different primary key definitions.
-        if bd.primary_key != wd.primary_key {
-            return Ok(());
-        }
+        return Ok(());
     }
     for c in &w.table.columns {
+        if b.table.columns.contains(c) && bd.column_type(c) != wd.column_type(c) {
+            out.push(SemanticChange::ColumnType {
+                master_id: id.into(),
+                column: c.clone(),
+                before: bd.column_type(c),
+                after: wd.column_type(c),
+            });
+        }
         if !b.table.columns.contains(c) {
             out.push(SemanticChange::AddedColumn {
                 master_id: id.into(),
@@ -1862,6 +1904,18 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
             next.masters
                 .insert(master_id.clone(), head.masters[master_id].clone());
         }
+        SemanticChange::ColumnType {
+            master_id, column, ..
+        } => {
+            let column_type = head.config.masters[master_id].column_type(column);
+            let (master, _) = get_master(next, master_id)?;
+            column_index(&master.table, column)?;
+            next.config
+                .masters
+                .get_mut(master_id)
+                .unwrap()
+                .set_column_type(column.clone(), column_type);
+        }
         SemanticChange::AddedColumn { master_id, column } => {
             let (m, d) = get_master(next, master_id)?;
             if d.primary_key.contains(column) {
@@ -1874,6 +1928,12 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
             }
             m.comments.cells.retain(|c| c.column != *column);
             m.scripts.columns.retain(|s| s.column != *column);
+            next.config
+                .masters
+                .get_mut(master_id)
+                .unwrap()
+                .column_types
+                .remove(column);
         }
         SemanticChange::DeletedColumn { master_id, column } => {
             let hm = head.masters[master_id]
@@ -1912,6 +1972,11 @@ fn apply_revert(next: &mut ProjectData, head: &ProjectData, change: &SemanticCha
                     .retain(|key| m.table.row_index(key, d).is_ok());
                 m.scripts.columns.push(script);
             }
+            next.config
+                .masters
+                .get_mut(master_id)
+                .unwrap()
+                .set_column_type(column.clone(), hd.column_type(column));
         }
         SemanticChange::AddedRow {
             master_id,

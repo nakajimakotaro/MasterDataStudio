@@ -1,3 +1,4 @@
+import { columnType, scriptValue, type ScriptValue } from "./columnTypes.ts";
 import type { CalculatedCell, PreparedEdit, Operation, Snapshot } from "./types";
 
 export function needsScriptPreview(snapshot: Snapshot, operation: Operation): boolean {
@@ -12,11 +13,11 @@ export function evaluateScripts(prepared: PreparedEdit, safeMode = false, operat
   // This guard precedes even compilation: recovery must work with infinite loops
   // and syntactically invalid JavaScript in metadata.
   if (safeMode) return [];
-  const compiled = new Map<string, (row: Record<string, string>) => unknown>();
+  const compiled = new Map<string, (row: Record<string, ScriptValue>) => unknown>();
   // A definition must parse even when the master contains no rows (or all
   // cells are overridden). This is deliberately bypassed in Safe Mode.
   if (operation?.type === "setScript" && operation.script !== null) {
-    try { compiled.set(JSON.stringify([operation.masterId, operation.column]), new Function("row", operation.script) as (row: Record<string, string>) => unknown); }
+    try { compiled.set(JSON.stringify([operation.masterId, operation.column]), new Function("row", operation.script) as (row: Record<string, ScriptValue>) => unknown); }
     catch (error) { throw new Error(`Script Error\nMaster: ${operation.masterId}\nColumn: ${operation.column}\nPrimary Key: [] (Script definition)\n\n${String(error)}`); }
   }
   const rows = new Map<string, Map<string, string[]>>();
@@ -40,21 +41,23 @@ export function evaluateScripts(prepared: PreparedEdit, safeMode = false, operat
       const scriptColumns = new Set(scripts.map(s => s.column));
       // Null prototype preserves column names such as '__proto__' and prevents
       // prototype properties from appearing as additional row inputs.
-      const row: Record<string, string> = Object.create(null);
+      const row: Record<string, ScriptValue> = Object.create(null);
       master.table.columns.forEach((c, i) => {
-        if (!scriptColumns.has(c)) row[c] = values[i];
+        if (!scriptColumns.has(c)) row[c] = scriptValue(values[i], columnType(def, c));
       });
       const id = JSON.stringify([masterId, column]);
       let fn = compiled.get(id);
       if (!fn) {
-        fn = new Function("row", entry.script) as (row: Record<string, string>) => unknown;
+        fn = new Function("row", entry.script) as (row: Record<string, ScriptValue>) => unknown;
         compiled.set(id, fn);
       }
       const result = fn(row);
       if (!["string", "number", "boolean"].includes(typeof result)) {
         throw new Error("戻り値は string / number / boolean にしてください。空文字は return \"\"; を使用します。");
       }
-      return { masterId, primaryKey, column, value: String(result) };
+      const value = typeof result === "boolean" && columnType(def, column) === "boolean"
+        ? (result ? "1" : "0") : String(result);
+      return { masterId, primaryKey, column, value };
     } catch (error) {
       throw new Error(`Script Error\nMaster: ${masterId}\nColumn: ${column}\nPrimary Key: ${JSON.stringify(primaryKey)}\n\n${String(error)}`);
     }

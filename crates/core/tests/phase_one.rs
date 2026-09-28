@@ -10,6 +10,7 @@ use std::{fs, path::Path};
 
 fn definition() -> MasterDefinition {
     MasterDefinition {
+        column_types: Default::default(),
         primary_key: vec!["stage".into(), "wave".into()],
     }
 }

@@ -105,7 +105,8 @@ pub fn targets(
         return Ok(vec![]);
     }
     let (id, keys, column): (&str, Option<BTreeSet<PrimaryKey>>, Option<&str>) = match operation {
-        Operation::RecalculateScripts { master_id } => (master_id, None, None),
+        Operation::RecalculateScripts { master_id }
+        | Operation::SetColumnTypes { master_id, .. } => (master_id, None, None),
         Operation::RevertChange { change } => match change {
             SemanticChange::Cell {
                 master_id,
@@ -125,6 +126,7 @@ pub fn targets(
             } => (master_id, Some(BTreeSet::from([primary_key.clone()])), None),
             SemanticChange::DeletedColumn { master_id, .. }
             | SemanticChange::DeletedMaster { master_id }
+            | SemanticChange::ColumnType { master_id, .. }
             | SemanticChange::MasterDefinition { master_id, .. } => (master_id, None, None),
             _ => return Ok(vec![]),
         },

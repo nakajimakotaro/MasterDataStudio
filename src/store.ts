@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { PrimaryKey } from "./types";
 
 export type Dialog =
+  | "columnType"
   | "columnScript"
   | "createMaster"
   | "deleteRows"
@@ -18,6 +19,7 @@ export type Dialog =
   | null;
 export type DraftRow = { key: PrimaryKey; cells: Record<string, string> };
 type UIState = {
+  typeColumn: string | null;
   scriptColumn: string | null;
   drafts: Record<string, DraftRow[]>;
   masterId: string | null;
@@ -32,6 +34,7 @@ type UIState = {
 };
 
 export const useUI = create<UIState>((set) => ({
+  typeColumn: null,
   scriptColumn: null,
   drafts: {},
   masterId: null,

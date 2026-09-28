@@ -9,6 +9,7 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 fn data(csv: &str) -> ProjectData {
     let def = MasterDefinition {
+        column_types: Default::default(),
         primary_key: vec!["id".into(), "wave".into()],
     };
     let table = Table::parse(csv.as_bytes(), &def).unwrap();

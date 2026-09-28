@@ -23,7 +23,8 @@ export type Master = {
   table: { columns: string[]; rows: string[][] };
   comments: Comments;
 };
-export type Definition = { primaryKey: string[] };
+export type ColumnType = "string" | "integer" | "decimal" | "boolean" | "date" | "time" | "datetime";
+export type Definition = { primaryKey: string[]; columnTypes?: Record<string, ColumnType> };
 export const csvPath = (masterId: string) => `masters/${masterId}.csv`;
 export type Snapshot = {
   gitStale?: boolean;
@@ -61,6 +62,7 @@ export type ReviewSummary = { root: string; revision: number; masters: string[];
 export type SemanticChange =
   | { kind: "projectConfig"; masterId: string; before: { protectedBranches: string[] } | null; after: { protectedBranches: string[] } }
   | { kind: "masterDefinition"; masterId: string; before: Definition; after: Definition }
+  | { kind: "columnType"; masterId: string; column: string; before: ColumnType; after: ColumnType }
   | { kind: "addedMaster" | "deletedMaster"; masterId: string }
   | { kind: "addedColumn" | "deletedColumn"; masterId: string; column: string }
   | { kind: "addedRow" | "deletedRow"; masterId: string; primaryKey: PrimaryKey }
@@ -76,6 +78,7 @@ export type CellEdit = {
   value: string;
 };
 export type Operation =
+  | { type: "setColumnTypes"; masterId: string; columnTypes: Record<string, ColumnType> }
   | { type: "revertChange"; change: SemanticChange }
   | { type: "setScript"; masterId: string; column: string; script: string | null }
   | { type: "replaceScripts"; masterId: string; scripts: Scripts }

@@ -1,7 +1,81 @@
 use gamemasterstudio_core::{
+    config::ColumnType,
     project::{git, CellEdit, Master, Operation, Project},
     scripts::{CalculatedCell, Scripts},
 };
+
+#[test]
+fn type_changes_and_reverts_recalculate_scripts_preserving_overrides_and_safe_mode() {
+    let (_dir, mut p) = fixture();
+    apply(
+        &mut p,
+        Operation::SetColumnTypes {
+            master_id: "enemy".into(),
+            column_types: [("attack".into(), ColumnType::String)].into(),
+        },
+    );
+    apply(&mut p, set_script("power", Some("return row.attack + 2;")));
+    apply(
+        &mut p,
+        Operation::EditCells {
+            master_id: "enemy".into(),
+            edits: vec![edit(&["1", "a"], "power", "manual")],
+        },
+    );
+    p.commit("計算列と上書きを保存", false).unwrap();
+    let operation = Operation::SetColumnTypes {
+        master_id: "enemy".into(),
+        column_types: [
+            ("attack".into(), ColumnType::Integer),
+            ("power".into(), ColumnType::Decimal),
+        ]
+        .into(),
+    };
+    let preview = p.preview(operation.clone(), p.snapshot().revision).unwrap();
+    assert_eq!(preview.targets.len(), 1);
+    assert_eq!(preview.targets[0].primary_key, strings(&["2", "b"]));
+    assert_eq!(
+        preview.data.config.masters["enemy"].column_type("attack"),
+        ColumnType::Integer
+    );
+    assert_eq!(
+        preview.data.config.masters["enemy"].column_type("power"),
+        ColumnType::Decimal
+    );
+    apply(&mut p, operation);
+    assert_eq!(master(&p).table.rows[0][3], "manual");
+    let change = p
+        .semantic_diff()
+        .unwrap()
+        .into_iter()
+        .find(|c| {
+            matches!(
+                c,
+                gamemasterstudio_core::project::SemanticChange::ColumnType { .. }
+            )
+        })
+        .unwrap();
+    let revert = Operation::RevertChange { change };
+    let preview = p.preview(revert.clone(), p.snapshot().revision).unwrap();
+    assert_eq!(preview.targets.len(), 1);
+    assert_eq!(
+        preview.data.config.masters["enemy"].column_type("attack"),
+        ColumnType::String
+    );
+    apply(&mut p, revert);
+    p.safe_mode = true;
+    let operation = Operation::SetColumnTypes {
+        master_id: "enemy".into(),
+        column_types: [("attack".into(), ColumnType::Decimal)].into(),
+    };
+    assert!(p
+        .preview(operation.clone(), p.snapshot().revision)
+        .unwrap()
+        .targets
+        .is_empty());
+    p.apply(operation, p.snapshot().revision).unwrap();
+    assert_eq!(master(&p).table.rows[0][3], "manual");
+}
 use std::fs;
 
 fn strings(values: &[&str]) -> Vec<String> {
@@ -77,6 +151,51 @@ fn fixture() -> (tempfile::TempDir, Project) {
     );
     p.commit("initial", false).unwrap();
     (dir, p)
+}
+
+#[test]
+fn large_inputs_and_rounded_or_infinite_script_results_are_saved_together() {
+    let (dir, mut p) = fixture();
+    apply(&mut p, set_script("power", Some("return row.attack * 2;")));
+    for (input, result) in [
+        (((1_u128 << 100) + 1).to_string(), "2.535301200456459e+30"),
+        ("9".repeat(400), "Infinity"),
+    ] {
+        let revision = p.snapshot().revision;
+        let operation = Operation::EditCells {
+            master_id: "enemy".into(),
+            edits: vec![edit(&["1", "a"], "attack", &input)],
+        };
+        let preview = p.preview(operation.clone(), revision).unwrap();
+        assert_eq!(preview.targets.len(), 1);
+        assert_eq!(
+            preview.data.masters["enemy"]
+                .data
+                .as_ref()
+                .unwrap()
+                .table
+                .rows[0][2],
+            input
+        );
+        // JavaScript evaluation is covered in tests/columnScripts.test.ts;
+        // the core receives its string result through IPC.
+        p.apply_calculated(
+            operation,
+            vec![CalculatedCell {
+                master_id: "enemy".into(),
+                edit: edit(&["1", "a"], "power", result),
+            }],
+            revision,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path().join("masters/enemy.csv")).unwrap(),
+            format!("id,wave,attack,power,score\n1,a,{input},{result},\n2,b,30,60,\n")
+        );
+        let reopened = Project::open(dir.path()).unwrap();
+        assert_eq!(master(&reopened).table.rows[0][2], input);
+        assert_eq!(master(&reopened).table.rows[0][3], result);
+    }
 }
 
 #[test]

@@ -10,7 +10,8 @@ import { useBusy, useRepositoryAction, useRepositoryState } from "./api";
 import { History } from "./History";
 import { ChangeReview } from "./ChangeReview";
 import { useUI } from "./store";
-import { csvPath, type Operation, type Snapshot } from "./types";
+import { columnType, columnTypeLabels } from "./columnTypes";
+import { csvPath, type ColumnType, type Operation, type Snapshot } from "./types";
 
 function Modal({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -70,6 +71,9 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
       ? (master?.table.columns.find((c) => !def.primaryKey.includes(c)) ?? "")
       : "",
   );
+  const [columnTypes, setColumnTypes] = useState<Record<string, ColumnType>>(() =>
+    Object.fromEntries((master?.table.columns ?? []).map(c => [c, def ? columnType(def, c) : "integer"])),
+  );
   const [scriptColumn, setScriptColumn] = useState(ui.scriptColumn ?? master?.table.columns.find(c => !def.primaryKey.includes(c)) ?? "");
   const [scriptBody, setScriptBody] = useState(master?.scripts?.columns.find(s => s.column === (ui.scriptColumn ?? master?.table.columns.find(c => !def.primaryKey.includes(c))))?.script ?? 'return "";');
   const [scriptMetadata, setScriptMetadata] = useState(JSON.stringify(master?.scripts, null, 2));
@@ -127,6 +131,39 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
     </Modal>;
   }
 
+  if (ui.dialog === "columnType" && master && def) {
+    const changedTypes = Object.fromEntries(master.table.columns
+      .filter(c => columnTypes[c] !== columnType(def, c))
+      .map(c => [c, columnTypes[c]]));
+    const typeHints: Partial<Record<ColumnType, string>> = {
+      date: "YYYY-MM-DD（例: 2026-09-28）",
+      time: "HH:mm:ss（例: 09:30:00、24時間表記）",
+      datetime: "YYYY-MM-DDTHH:mm:ss（例: 2026-09-28T09:30:00、タイムゾーンなし）",
+      boolean: "1（真）/ 0（偽）",
+    };
+    return <Modal title="カラムの型">
+      <form onSubmit={submit(() => void edit({ type: "setColumnTypes", masterId, columnTypes: changedTypes }))}>
+        <div className="modal-body">
+          <div className="column-type-list">
+            <div className="column-type-heading" aria-hidden="true"><span>カラム</span><span>型</span></div>
+            {master.table.columns.map(c => <label className="column-type-row" key={c}>
+              <code>{c}</code>
+              <select value={columnTypes[c]} disabled={busy || !editable}
+                autoFocus={c === (ui.typeColumn ?? master.table.columns[0])}
+                onChange={e => setColumnTypes(current => ({ ...current, [c]: e.target.value as ColumnType }))}>
+                {Object.entries(columnTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              {typeHints[columnTypes[c]] && <small>{typeHints[columnTypes[c]]}</small>}
+            </label>)}
+          </div>
+          <p className="hint">型に合わない値はエラー表示します。保存・コミットは可能です。空欄は許可します。</p>
+          <p className="hint">型を変更すると Script を再計算します。手動上書きした計算結果は維持します。</p>
+        </div>
+        {footer("保存", !editable || !Object.keys(changedTypes).length)}
+      </form>
+    </Modal>;
+  }
+
   if (ui.dialog === "columnScript" && master) {
     const existing = master.scripts?.columns.find(s => s.column === scriptColumn);
     const recovery = !!master.scriptError && project.safeMode;
@@ -148,7 +185,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
               setScriptBody(master.scripts?.columns.find(s => s.column === e.target.value)?.script ?? 'return "";');
             }}>{master.table.columns.filter(c => !def.primaryKey.includes(c)).map(c => <option key={c} value={c}>{c}{master.scripts?.columns.some(s => s.column === c) ? " ƒ" : ""}</option>)}</select></label>
             <label>JavaScript<textarea className="script-code" rows={12} value={scriptBody} onChange={e => setScriptBody(e.target.value)} autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" /></label>
-            <p className="hint">row には同じ行の通常 Column の文字列が入ります。string / number / boolean を return してください。手動上書きしたセルは再計算されません。</p>
+            <p className="hint">row には同じ行の通常 Column の値が入ります。整数・小数は Number、真偽値列の 1 / 0 は boolean に変換します。string / number / boolean を return してください。真偽値列では boolean の結果を 1 / 0 で保存します。手動上書きしたセルは再計算されません。</p>
             {existing && <button type="button" className="danger-button" disabled={!editable || busy} onClick={() => void edit({ type: "setScript", masterId, column: scriptColumn, script: null })}>Remove Script（現在値を維持）</button>}
           </>}
         </div>
@@ -312,7 +349,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
         >
           <div className="modal-body">
             <p className="hint">
-              すべての Cell は文字列です。Primary Key は複数の Column
+              値は文字列で保存します。作成後にカラムの型を設定できます。Primary Key は複数の Column
               を組み合わせられます。
             </p>
             <label>
@@ -407,6 +444,7 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
               {master.table.columns.map((c) => (
                 <div key={c}>
                   <code>{c}</code>
+                  <span>{columnTypeLabels[columnType(def, c)]}</span>
                   {def.primaryKey.includes(c) && (
                     <span>
                       <KeyRound size={13} />

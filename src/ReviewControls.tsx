@@ -7,7 +7,7 @@ export function Pager({ offset, size, total, busy = false, onChange }: { offset:
   </div>;
 }
 export const changeLabels: Record<string, string> = {
-  cell: "セル", comment: "コメント", addedRow: "行追加", deletedRow: "行削除",
+  columnType: "カラム型", cell: "セル", comment: "コメント", addedRow: "行追加", deletedRow: "行削除",
   addedColumn: "列追加", deletedColumn: "列削除", addedMaster: "Master 追加", deletedMaster: "Master 削除",
   projectConfig: "Project 設定", masterDefinition: "Master 定義",
 };

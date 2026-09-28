@@ -3,6 +3,17 @@ import assert from "node:assert/strict";
 import { buildReviewTable } from "../src/reviewModel.ts";
 import type { ChangeReviewData, Master, SemanticChange } from "../src/types.ts";
 
+test("type-only changes are discoverable at the column without changing cell values", () => {
+  const m = master(["id", "hp"], [["1", "abc"]]);
+  const change: SemanticChange = { kind: "columnType", masterId: "enemy", column: "hp", before: "string", after: "integer" };
+  const review = buildReviewTable(data(m, m, [change]), "enemy", true)!;
+  assert.equal(review.columns[1].tone, "modified");
+  assert.deepEqual(review.columns[1].changes, [change]);
+  assert.equal(review.rows.length, 1);
+  assert.equal(review.rows[0].cells.get("hp")?.tone, null);
+  assert.deepEqual(review.rows[0].cells.get("hp")?.changes, [change]);
+});
+
 function master(columns: string[], rows: string[][]): Master {
   return { table: { columns, rows }, comments: { version: 1, table: null, rows: [], cells: [] } };
 }

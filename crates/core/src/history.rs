@@ -253,6 +253,9 @@ fn change_location(change: &SemanticChange) -> (&str, &str, &str) {
         MasterDefinition { master_id, .. } => (master_id, "masterDefinition", ""),
         AddedMaster { master_id } => (master_id, "addedMaster", ""),
         DeletedMaster { master_id } => (master_id, "deletedMaster", ""),
+        ColumnType {
+            master_id, column, ..
+        } => (master_id, "columnType", column),
         AddedColumn { master_id, column } => (master_id, "addedColumn", column),
         DeletedColumn { master_id, column } => (master_id, "deletedColumn", column),
         AddedRow { master_id, .. } => (master_id, "addedRow", ""),

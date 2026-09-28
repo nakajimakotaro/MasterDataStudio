@@ -38,7 +38,7 @@ CSV とコメントは操作確定時に自動保存されます。Save ボタ�
 ### 編集ルール
 
 - Primary Key は左に固定し、保存後もセル編集・貼り付け・オートフィルができます。複合キーを常に tuple として扱い、操作後に空・重複があれば全体を拒否します。キーを変更しても行・セルのコメントを引き継ぎます。
-- セルはすべて文字列。空値は `""` で、数値への自動変換や NULL はありません。
+- セルの内部保持・CSV はすべて文字列。空値は `""` で NULL はありません。型定義による検証は保存を妨げず、Scriptへの入力時のみ型変換します。
 - CSV は UTF-8 / BOM なし、comma、必須 header、LF、final newline あり。`csv = 1.4.0` の固定 Writer 設定を使用します。
 - 保存順は Primary Key tuple の raw string 辞書順。Grid の sort / filter は保存順に影響しません。
 - Column は末尾追加、初期値は空文字。削除は確認ダイアログを経由します。
@@ -85,6 +85,52 @@ Master ID は `^[A-Za-z0-9][A-Za-z0-9_-]*$`。データは `masters/<ID>.csv` �
 コメントは 2 spaces indent / LF / final newline ありの JSON。Row コメントはキー tuple、Cell コメントはキー tuple → Column 名順に並べます。作者は Repository context の `git config user.name` / `user.email`、日時は UTC RFC 3339 のミリ秒精度です。GUI はローカル時刻を表示します。
 
 最近開いた Project は Tauri の app data directory の `settings.json` に保存します。Repository には置きません。
+
+## カラムの型と外部ツールからの利用
+
+`gamemasterstudio/project.yaml` に、カラム名から型名への対応を保存します。
+
+```yaml
+version: 1
+git:
+  protectedBranches: [main]
+masters:
+  enemy:
+    primaryKey: [id]
+    columnTypes:
+      name: string
+      rate: decimal
+      enabled: boolean
+      release_date: date
+      reset_time: time
+      starts_at: datetime
+```
+
+外部ツールは `masters/enemy.csv` のヘッダーをカラム名として型を参照します。`columnTypes` にないカラムは `integer`（整数）です。明示的な `integer` も読み込み可能です。アプリで整数型に戻すと対応する定義を省略します。文字列として扱うカラムは `string` を明示します。CSVに型行は追加しません。
+
+| 型名 | 入力チェック（空文字以外） | Script の row に渡す値 |
+| --- | --- | --- |
+| `string` | 制限なし | 元の文字列 |
+| `integer` | 符号付き10進整数。桁数・値の範囲制限なし | `Number(value)` |
+| `decimal` | 10進数。小数点・指数表記を許可。桁数・値の範囲制限なし | `Number(value)` |
+| `boolean` | `1`（真）/ `0`（偽） | `1` → `true`、`0` → `false`。不正値・空文字は元の文字列 |
+| `date` | 実在する日付、`YYYY-MM-DD`、年は0001〜9999 | 元の文字列（時刻なし） |
+| `time` | 時刻、`HH:mm:ss`、00:00:00〜23:59:59 | 元の文字列（日付なし） |
+| `datetime` | 日時、`YYYY-MM-DDTHH:mm:ss`、日付・時刻の両方を検証 | 元の文字列 |
+
+日付・時刻・日時はタイムゾーンを持たず、自動変換しません。時刻・日時は秒まで必須です。小数秒・うるう秒・`24:00:00`・`Z` や UTC オフセット付きの値はエラー表示します。
+
+真偽値列の Script が boolean を返した場合、`true` は `"1"`、`false` は `"0"` として保存します。文字列の `"true"` / `"false"` は自動変換せず、型エラーとして表示します。
+
+全型で空文字を許可します。数値列の空文字は Script 内で `0` です。前後の空白、16進数表記などは数値型の入力エラーになりますが、Script では常に JavaScript の `Number` の変換規則を使います。たとえば整数列の `1.5` はエラー表示されても `1.5` として計算され、`abc` は `NaN` になります。保存値の自動修正は行いません。Primary Key の非空・一意制約は型とは独立して維持します。
+
+数値の保存に JavaScript の精度・範囲制限はありません。整数・小数列でも入力値は文字列のままCSVへ保存し、再読み込みします。たとえば `2^100` の10進表記 `1267650600228229401496703205376` や、その値に1を足した `1267650600228229401496703205377` も各桁を保持します。セルに `2^100` と入力しても式としては計算しません。型チェックは入力形式だけを判定し、整数の安全範囲超過や `1e999` のような `Number` の範囲を超える小数表記でも警告しません。Script の有無・削除履歴にかかわらず同じルールです。`NaN` / `Infinity` そのものは数値の入力形式に合わないため、引き続き型エラーです。
+
+Script は任意精度計算ではありません。数値列を `Number` に変換すると、上記の2つの整数は同じ値になり、`return row.hp;` の結果はいずれも `1.2676506002282294e+30` です。加算しても値が変わらない場合や、極端な値が `Infinity` になる場合もあります。通常列の入力値は変えず、Script列にはその計算結果を保存します。精度の欠落・オーバーフロー自体では保存を止めません。正確に扱う必要がある場合は入力列を `string` にし、整数なら Script 内で `BigInt(row.hp)` を使って計算し、結果を `.toString()` で返してください（`bigint` の直接返却は非対応）。
+
+型エラーはセルの赤枠・アイコン、ツールチップ、Inspector、テーブル上部の件数で確認できます。件数ボタンは検索・フィルターを解除して次のエラーに移動します。Script の結果にも出力先の型を適用し、`NaN` / `Infinity` なども保存後にエラー表示します。保存・コミットは拒否しません。構文エラー・実行時例外・非対応の戻り値など、Script 自体のエラーは従来どおり操作を拒否します。
+
+型変更は Changes と History にカラム単位で表示し、個別に Revert できます。型変更・型の Revert は、そのMasterの全 Script を再計算します。手動上書きは維持し、Safe Modeでは実行しません。列を削除すると型定義も削除し、削除の Revert で型も復元します。マージでは既存の Master 定義変更と同様、型定義変更を含む分岐は Master 全体を選択して解決します。
 
 ## 構成
 

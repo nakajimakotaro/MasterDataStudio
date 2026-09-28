@@ -24,6 +24,7 @@ fn comment(body: &str, second: u8, name: &str) -> Option<Comment> {
 }
 fn data() -> ProjectData {
     let def = MasterDefinition {
+        column_types: Default::default(),
         primary_key: vec!["id".into(), "wave".into()],
     };
     let table = Table::parse(b"id,wave,hp\n1,2,100\n1,10,200\n", &def).unwrap();
