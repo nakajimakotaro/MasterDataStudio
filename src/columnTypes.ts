@@ -25,12 +25,17 @@ export function columnTypeError(value: string, type: ColumnType): string | null 
     case "boolean":
       return value === "1" || value === "0" ? null : "1（真）または 0（偽）を入力してください";
     case "time": {
-      if (!/^\d{2}:\d{2}:\d{2}$/.test(value)) return "時刻は HH:mm:ss で入力してください";
-      const [hour, minute, second] = value.split(":").map(Number);
-      return hour <= 23 && minute <= 59 && second <= 59 ? null : "時刻の範囲が不正です（00:00:00〜23:59:59）";
+      const match = /^(\d{2}):(\d{2}):(\d{2})(Z|[+-]\d{2}:\d{2})?$/.exec(value);
+      if (!match) return "時刻は HH:mm:ss（タイムゾーンは Z または ±HH:mm を任意で付加）で入力してください";
+      const [hour, minute, second] = match.slice(1, 4).map(Number);
+      if (hour > 23 || minute > 59 || second > 59) return "時刻の範囲が不正です（00:00:00〜23:59:59）";
+      const offset = match[4]?.length === 6 ? match[4].slice(1).split(":").map(Number) : [0, 0];
+      return offset[0] <= 23 && offset[1] <= 59 ? null : "タイムゾーンの範囲が不正です（-23:59〜+23:59）";
     }
     case "datetime":
-      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) return "日時は YYYY-MM-DDTHH:mm:ss で入力してください";
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})?$/.test(value)) {
+        return "日時は YYYY-MM-DDTHH:mm:ss（タイムゾーンは Z または ±HH:mm を任意で付加）で入力してください";
+      }
       return columnTypeError(value.slice(0, 10), "date") ?? columnTypeError(value.slice(11), "time");
     case "date": {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "日付は YYYY-MM-DD で入力してください";

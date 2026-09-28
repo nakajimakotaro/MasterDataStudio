@@ -53,13 +53,14 @@ test("boolean validation does not use JavaScript truthiness and arbitrary column
   assert.equal(columnType({ primaryKey: ["id"], columnTypes: { name: "string" } }, "name"), "string");
 });
 
-test("time validation requires seconds and a valid 24-hour clock", () => {
-  for (const value of ["00:00:00", "09:30:00", "23:59:59"]) assert.equal(columnTypeError(value, "time"), null, value);
-  for (const value of ["24:00:00", "12:60:00", "12:00:60", "9:30:00", "09:30", "09:30:00.123", "09:30:00Z", "09:30:00+09:00", "-1:00:00", " 09:30:00", "2026-09-28T09:30:00"]) assert.ok(columnTypeError(value, "time"), value);
+test("time validation requires seconds and a valid 24-hour clock with an optional timezone", () => {
+  for (const value of ["00:00:00", "09:30:00", "23:59:59", "09:30:00Z", "09:30:00+09:00", "09:30:00-05:30", "09:30:00+23:59"]) assert.equal(columnTypeError(value, "time"), null, value);
+  for (const value of ["24:00:00", "12:60:00", "12:00:60", "9:30:00", "09:30", "09:30:00.123", "09:30:00z", "09:30:00+0900", "09:30:00+09", "09:30:00+24:00", "09:30:00+09:60", "09:30:00 +09:00", "-1:00:00", " 09:30:00", "2026-09-28T09:30:00"]) assert.ok(columnTypeError(value, "time"), value);
 });
 
 test("datetime validation checks both calendar and time without parsing or normalizing strings", () => {
-  for (const value of ["0001-01-01T00:00:00", "2000-02-29T12:30:45", "2026-09-28T09:30:00", "9999-12-31T23:59:59"]) assert.equal(columnTypeError(value, "datetime"), null, value);
-  for (const value of ["0000-01-01T00:00:00", "1900-02-29T12:30:45", "2026-04-31T12:30:45", "2026-09-28T24:00:00", "2026-09-28T12:60:00", "2026-09-28T12:00:60", "2026-09-28", "09:30:00", "2026-09-28 09:30:00", "2026-09-28T09:30", "2026-09-28T09:30:00.123", "2026-09-28T09:30:00Z", "2026-09-28T09:30:00+09:00", "2026-09-28T09:30:00\n"]) assert.ok(columnTypeError(value, "datetime"), value);
+  for (const value of ["0001-01-01T00:00:00", "2000-02-29T12:30:45", "2026-09-28T09:30:00", "9999-12-31T23:59:59", "2026-09-28T09:30:00Z", "2026-09-28T09:30:00+09:00", "2026-09-28T09:30:00-05:30"]) assert.equal(columnTypeError(value, "datetime"), null, value);
+  for (const value of ["0000-01-01T00:00:00", "1900-02-29T12:30:45", "2026-04-31T12:30:45", "2026-09-28T24:00:00", "2026-09-28T12:60:00", "2026-09-28T12:00:60", "2026-09-28", "09:30:00", "2026-09-28 09:30:00", "2026-09-28T09:30", "2026-09-28T09:30:00.123", "2026-09-28T09:30:00.123Z", "2026-09-28T09:30:00z", "2026-09-28T09:30:00+0900", "2026-09-28T09:30:00+24:00", "2026-09-28T09:30:00\n"]) assert.ok(columnTypeError(value, "datetime"), value);
   assert.equal(scriptValue("invalid datetime", "datetime"), "invalid datetime");
+  assert.equal(scriptValue("2026-09-28T09:30:00+09:00", "datetime"), "2026-09-28T09:30:00+09:00");
 });

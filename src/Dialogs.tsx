@@ -137,8 +137,8 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
       .map(c => [c, columnTypes[c]]));
     const typeHints: Partial<Record<ColumnType, string>> = {
       date: "YYYY-MM-DD（例: 2026-09-28）",
-      time: "HH:mm:ss（例: 09:30:00、24時間表記）",
-      datetime: "YYYY-MM-DDTHH:mm:ss（例: 2026-09-28T09:30:00、タイムゾーンなし）",
+      time: "HH:mm:ss（例: 09:30:00、24時間表記。末尾に Z / +09:00 などのタイムゾーンも可）",
+      datetime: "YYYY-MM-DDTHH:mm:ss（例: 2026-09-28T09:30:00、2026-09-28T09:30:00+09:00、2026-09-28T00:30:00Z）",
       boolean: "1（真）/ 0（偽）",
     };
     return <Modal title="カラムの型">
