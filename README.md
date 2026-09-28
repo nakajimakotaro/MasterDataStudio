@@ -103,9 +103,10 @@ pnpm tauri dev
    | 項目                   | 入力例                    |
    | -------------------- | ---------------------- |
    | ID                   | `enemy`                |
-   | CSV path             | `masters/enemy.csv`    |
    | Columns（1行に1つ）       | `enemy_id`、`name`、`hp` |
    | Primary Key（行を識別する列） | `enemy_id`             |
+
+   データは `masters/<ID>.csv` に保存されます。
 
 4. 行を追加して値を入力し、**新規行を保存**で確定します。
 

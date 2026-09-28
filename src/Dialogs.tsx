@@ -10,7 +10,7 @@ import { useBusy, useRepositoryAction, useRepositoryState } from "./api";
 import { History } from "./History";
 import { ChangeReview } from "./ChangeReview";
 import { useUI } from "./store";
-import type { Operation, Snapshot } from "./types";
+import { csvPath, type Operation, type Snapshot } from "./types";
 
 function Modal({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -61,7 +61,6 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
   const master = project.data.masters[masterId]?.data;
   const def = project.data.config.masters[masterId];
   const [id, setId] = useState("");
-  const [path, setPath] = useState(def?.path ?? "");
   const [columns, setColumns] = useState("id\nname");
   const [primaryKeys, setPrimaryKeys] = useState(
     def?.primaryKey.join("\n") ?? "id",
@@ -306,7 +305,6 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
               void edit({
                 type: "createMaster",
                 masterId: id,
-                path: path || `masters/${id}.csv`,
                 columns: lines(columns),
                 primaryKey: lines(primaryKeys),
               }),
@@ -332,18 +330,10 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
                 autoComplete="off"
               />
             </label>
-            <label>
-              CSV path
-              <input
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                placeholder={`masters/${id || "enemy"}.csv`}
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                autoComplete="off"
-              />
-            </label>
+            <div className="save-path">
+              <span>保存先</span>
+              <code>masters/{id || "…"}.csv</code>
+            </div>
             <div className="form-columns">
               <label>
                 Columns <small>1 行に 1 Column・上から保存順</small>
@@ -388,29 +378,18 @@ export function ProjectDialogs({ project }: { project: Snapshot }) {
               void edit({
                 type: "configureMaster",
                 masterId,
-                path,
                 primaryKey: lines(primaryKeys),
               }),
           )}
         >
           <div className="modal-body">
             <p className="hint">
-              Row が 1 件以上ある Master の path / Primary Key
-              は読み取り専用です。
+              Row が 1 件以上ある Master の Primary Key は読み取り専用です。
             </p>
-            <label>
-              CSV path
-              <input
-                required
-                readOnly={!!master.table.rows.length}
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                autoCorrect="off"
-                autoCapitalize="none"
-                spellCheck={false}
-                autoComplete="off"
-              />
-            </label>
+            <div className="save-path">
+              <span>保存先</span>
+              <code>{csvPath(masterId)}</code>
+            </div>
             <label>
               Primary Key <small>1 行に 1 Column・上から tuple 順</small>
               <textarea

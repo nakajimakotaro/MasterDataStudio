@@ -18,7 +18,6 @@ fn fixture() -> (tempfile::TempDir, Project) {
         &mut project,
         Operation::CreateMaster {
             master_id: "enemy".into(),
-            path: "masters/enemy.csv".into(),
             primary_key: vec!["id".into()],
             columns: vec!["id".into(), "hp".into()],
         },

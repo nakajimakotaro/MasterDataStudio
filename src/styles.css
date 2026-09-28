@@ -1301,6 +1301,22 @@ dialog::backdrop {
   border-radius: 4px;
   color: #a87c65;
 }
+.save-path {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 13px;
+  border: 1px solid #e3eae5;
+  border-radius: 6px;
+  font-size: 11px;
+}
+.save-path > span {
+  color: #87949c;
+  flex-shrink: 0;
+}
+.save-path > code {
+  overflow-wrap: anywhere;
+}
 .column-list {
   display: flex;
   flex-direction: column;

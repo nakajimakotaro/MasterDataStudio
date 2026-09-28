@@ -1,6 +1,6 @@
 use gamemasterstudio_core::{
     comments::Comments,
-    config::{MasterDefinition, ProjectConfig, CONFIG_PATH},
+    config::{csv_path, MasterDefinition, ProjectConfig, CONFIG_PATH},
     csv_data::Table,
     merge::{merge_project, three_way, MergePlan, Resolution},
     project::{git, Master, MasterEntry, Operation, Project, ProjectData},
@@ -9,7 +9,6 @@ use std::{collections::BTreeMap, fs, path::Path};
 
 fn data(csv: &str) -> ProjectData {
     let def = MasterDefinition {
-        path: "masters/enemy.csv".into(),
         primary_key: vec!["id".into(), "wave".into()],
     };
     let table = Table::parse(csv.as_bytes(), &def).unwrap();
@@ -178,25 +177,18 @@ fn master_add_delete_and_modify_conflicts() {
     assert_eq!(p.view.conflicts[0].kind, "cell");
 }
 #[test]
-fn changed_path_or_key_requires_whole_master_definition_choice() {
+fn changed_key_requires_whole_master_definition_choice() {
     let b = data("id,wave,hp\n1,1,100\n");
     for added in [true, false] {
-        for key_change in [true, false] {
-            let mut a = b.clone();
-            let def = a.config.masters.get_mut("enemy").unwrap();
-            if key_change {
-                def.primary_key = vec!["hp".into()];
-            } else {
-                def.path = "other.csv".into();
-            }
-            let base = if added { empty() } else { b.clone() };
-            let p = plan(&base, &a, &b);
-            assert_eq!(p.view.remaining, 1);
-            assert_eq!(p.view.conflicts[0].kind, "projectConfig");
-            let p = choose_all(&base, &a, &b, Resolution::Theirs);
-            assert_eq!(p.data.config.masters["enemy"], b.config.masters["enemy"]);
-            assert_eq!(p.view.remaining, 0);
-        }
+        let mut a = b.clone();
+        a.config.masters.get_mut("enemy").unwrap().primary_key = vec!["hp".into()];
+        let base = if added { empty() } else { b.clone() };
+        let p = plan(&base, &a, &b);
+        assert_eq!(p.view.remaining, 1);
+        assert_eq!(p.view.conflicts[0].kind, "projectConfig");
+        let p = choose_all(&base, &a, &b, Resolution::Theirs);
+        assert_eq!(p.data.config.masters["enemy"], b.config.masters["enemy"]);
+        assert_eq!(p.view.remaining, 0);
     }
 }
 
@@ -204,7 +196,7 @@ fn write_project(root: &Path, p: &ProjectData) {
     fs::create_dir_all(root.join("gamemasterstudio")).unwrap();
     fs::write(root.join(CONFIG_PATH), p.config.serialize().unwrap()).unwrap();
     for (id, def) in &p.config.masters {
-        let path = root.join(&def.path);
+        let path = root.join(csv_path(id));
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(
             path,
@@ -450,23 +442,6 @@ fn deleting_different_structures_does_not_create_spurious_conflicts() {
     let p = plan(&b, &a, &c);
     assert_eq!(p.view.remaining, 0);
     assert_eq!(table(&p).rows, vec![vec!["2", "1"]]);
-}
-#[test]
-fn separate_master_ids_cannot_silently_claim_the_same_csv() {
-    let b = empty();
-    let a = data("id,wave,hp\n1,1,100\n");
-    let mut c = data("id,wave,hp\n1,1,120\n");
-    let def = c.config.masters.remove("enemy").unwrap();
-    c.config.masters.insert("item".into(), def);
-    let master = c.masters.remove("enemy").unwrap();
-    c.masters.insert("item".into(), master);
-    let p = plan(&b, &a, &c);
-    assert_eq!(p.view.remaining, 1);
-    assert_eq!(p.view.conflicts[0].kind, "projectConfig");
-    let mut p = choose_all(&b, &a, &c, Resolution::Theirs);
-    p.data.config.validate().unwrap();
-    assert!(p.data.masters.contains_key("item"));
-    assert!(!p.data.masters.contains_key("enemy"));
 }
 #[test]
 fn textually_clean_merge_still_checks_definition_changes() {

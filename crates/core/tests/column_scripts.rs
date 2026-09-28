@@ -61,7 +61,6 @@ fn fixture() -> (tempfile::TempDir, Project) {
         &mut p,
         Operation::CreateMaster {
             master_id: "enemy".into(),
-            path: "enemy.csv".into(),
             primary_key: strings(&["id", "wave"]),
             columns: strings(&["id", "wave", "attack", "power", "score"]),
         },
@@ -394,7 +393,7 @@ fn failed_metadata_write_rolls_back_csv_state_and_revision() {
     let (dir, mut p) = fixture();
     let before = master(&p);
     let revision = p.snapshot().revision;
-    let csv = fs::read(dir.path().join("enemy.csv")).unwrap();
+    let csv = fs::read(dir.path().join("masters/enemy.csv")).unwrap();
     fs::write(
         dir.path().join("gamemasterstudio/scripts"),
         "not a directory",
@@ -412,11 +411,11 @@ fn failed_metadata_write_rolls_back_csv_state_and_revision() {
         },
     ];
     assert!(p.apply_calculated(op, cells, revision).is_err());
-    assert_eq!(fs::read(dir.path().join("enemy.csv")).unwrap(), csv);
+    assert_eq!(fs::read(dir.path().join("masters/enemy.csv")).unwrap(), csv);
     fs::remove_file(dir.path().join("gamemasterstudio/scripts")).unwrap();
     assert_eq!(master(&p), before);
     assert_eq!(p.snapshot().revision, revision);
-    assert_eq!(fs::read(dir.path().join("enemy.csv")).unwrap(), csv);
+    assert_eq!(fs::read(dir.path().join("masters/enemy.csv")).unwrap(), csv);
 }
 
 #[test]
@@ -521,7 +520,6 @@ fn configuring_an_empty_master_cannot_turn_a_script_column_into_a_key() {
         .apply(
             Operation::ConfigureMaster {
                 master_id: "enemy".into(),
-                path: "enemy.csv".into(),
                 primary_key: strings(&["power"])
             },
             p.snapshot().revision

@@ -29,7 +29,7 @@ VITE_AG_GRID_LICENSE_KEY=your-license-key
 
 1. 起動画面で **Repository を開く** を選択します。未設定の場合は **Project を初期化** で既存のフォルダを選択します。Git Repository がなければ `git init -b main` を実行します。既存 Repository のサブフォルダを選ぶと、その Repository のルートを使用します。
 2. Git Identity が未設定の場合、**Project Settings** で名前とメールアドレスを設定します。Repository-local の Git config に保存します。未設定でも閲覧できます。
-3. **Master を作成** で ID、CSV path、Column 一覧、Primary Key を入力します。Columns / Primary Key はそれぞれ 1 行に 1 つ入力します。複合キーの順序は Primary Key の入力順です。
+3. **Master を作成** で ID、Column 一覧、Primary Key を入力します。データは `masters/<ID>.csv` に保存されます。Columns / Primary Key はそれぞれ 1 行に 1 つ入力します。複合キーの順序は Primary Key の入力順です。
 4. Master を開き、セルのダブルクリックで編集します。Row 追加・複製・削除、Column 追加・削除はツールバーから操作します。
 5. セルを選択し、右側 Inspector から Table / Row / Cell Comment を編集します。入力欄を離れるか `⌘/Ctrl + Enter` で確定・自動保存します。本文を空白だけにすると削除します。
 
@@ -48,9 +48,9 @@ CSV とコメントは操作確定時に自動保存されます。Save ボタ�
 - Row / Column を削除すると、対応するコメントも同時に削除します。Row 複製はコメントを複製しません。
 - Row をクリックし、Shift を押しながら終了行をクリックすると、その間の行をまとめて選択できます。`⌘/Ctrl + クリック` または左端のチェックボックスで個別に選択・解除できます。左上のチェックボックスまたは表内で `⌘/Ctrl + A` を使うと、検索・フィルターに一致する全行を選択できます。
 - 選択後、ツールバーの複製ボタンまたは選択行の右クリックメニューから一括複製できます。100 行選択すれば 100 行すべてのセル値をコピーし、複製した行を選択します。複製・追加した未保存行は、並び替え中でも追加順で表の一番下に表示します。Primary Key を重複しない値に変更して「新規行を保存」で確定してください。保存後は通常の並び替えに従います。
-- 空の Master では Settings から path / Primary Key を変更できます。Row があれば読み取り専用です。
+- 空の Master では Settings から Primary Key を変更できます。Row があれば読み取り専用です。
 - CSV / コメントを正しく読み込めない Master はエラー表示で編集を無効化します。他の Master は引き続き操作できます。
-- 入力欄では OS の自動大文字化・自動修正・スペルチェック・入力補完（オートフィル）を無効化しています。Branch 名、Master ID、CSV path など、大文字と小文字を区別する値をそのまま入力できます。AG Grid のセル編集のみ、Grid が生成する入力欄のためブラウザ既定の挙動が残ります。
+- 入力欄では OS の自動大文字化・自動修正・スペルチェック・入力補完（オートフィル）を無効化しています。Branch 名、Master ID など、大文字と小文字を区別する値をそのまま入力できます。AG Grid のセル編集のみ、Grid が生成する入力欄のためブラウザ既定の挙動が残ります。
 
 ## Project Config
 
@@ -72,17 +72,15 @@ git:
     - main
 masters:
   enemy:
-    path: masters/enemy.csv
     primaryKey:
       - enemy_id
   stage_enemy:
-    path: masters/stage_enemy.csv
     primaryKey:
       - stage_id
       - wave_id
 ```
 
-Master ID は `^[A-Za-z0-9][A-Za-z0-9_-]*$`。CSV path は Repository 相対の `.csv` パスです。絶対パス、`..`、予約ディレクトリ、symlink、重複 path を拒否します。Windows と macOS 間の可搬性のため、大文字小文字だけが違う CSV path / Master ID も重複として扱います。
+Master ID は `^[A-Za-z0-9][A-Za-z0-9_-]*$`。データは `masters/<ID>.csv` に保存します。Windows と macOS 間の可搬性のため、大文字小文字だけが違う Master ID は重複として扱います。
 
 コメントは 2 spaces indent / LF / final newline ありの JSON。Row コメントはキー tuple、Cell コメントはキー tuple → Column 名順に並べます。作者は Repository context の `git config user.name` / `user.email`、日時は UTC RFC 3339 のミリ秒精度です。GUI はローカル時刻を表示します。
 
@@ -127,7 +125,7 @@ pnpm tauri build
 pnpm tauri build --debug --bundles app
 ```
 
-Rust テストでは canonical CSV、複合キー、設定・path 検証、コメントの作者維持と削除、書き込み失敗時の復元、破損 Master の分離などを検証します。包括的な UI / E2E テストスイートは追加していません。
+Rust テストでは canonical CSV、複合キー、設定検証、コメントの作者維持と削除、書き込み失敗時の復元、破損 Master の分離などを検証します。包括的な UI / E2E テストスイートは追加していません。
 
 ## 実装範囲
 
@@ -152,7 +150,7 @@ Phase 2 の Git status / Branch / Commit / Push / Fetch / Update / Change Review
 - Working Branch の Merge には `--no-commit --no-edit` を使います。Git がテキストとして自動解決しても、Commit 前に Master の定義や Primary Key の意味を確認します。fast-forward はそのまま適用し、Protected Branch の Update は `--ff-only` です。
 - 複合 Primary Key tuple を Row identity とし、値を raw string として 3-way 比較します。片側のみの変更・同じ値への変更は自動採用し、同じ Cell の異なる値だけを競合として残します。
 - Row / Column / Master の delete vs modify を扱います。Column 順序は Base → Your Branch の追加 → Incoming の追加。削除が確定した Row / Column に属するコメントは除去します。
-- Master の path / Primary Key が食い違う場合は、Master の定義とデータをまとめて選択します。異なる Master が同じ CSV path を使用するなど、組み合わせた Config が無効になる場合は Project 全体の選択を求めます。
+- Master の Primary Key が食い違う場合は、Master の定義とデータをまとめて選択します。組み合わせた Config が無効になる場合は Project 全体の選択を求めます。
 - コメントは Table / Row / Cell の identity ごとに本文を semantic merge します。同じ identity の本文が競合したときだけ選択・手動編集を求めます。
 - 解決途中の選択は Rust session に保持します。Complete Merge までは Working Tree / index stages を書き換えません。再起動・Project 再オープン時は Git の Merge state から再構築し、選択をやり直せます。
 - Merge 中の通常編集・通常 Commit・Branch 切替・Update は禁止します。Fetch と Identity 設定は利用できます。

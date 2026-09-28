@@ -1,6 +1,6 @@
 use gamemasterstudio_core::{
     comments::{Comment, CommentTarget, Comments, Identity},
-    config::{GitConfig, MasterDefinition, ProjectConfig, CONFIG_PATH},
+    config::{csv_path, GitConfig, MasterDefinition, ProjectConfig, CONFIG_PATH},
     csv_data::Table,
     merge::{merge_comment, merge_project, Resolution},
     project::{git, Master, MasterEntry, Operation, Project, ProjectData, SemanticChange},
@@ -24,7 +24,6 @@ fn comment(body: &str, second: u8, name: &str) -> Option<Comment> {
 }
 fn data() -> ProjectData {
     let def = MasterDefinition {
-        path: "masters/enemy.csv".into(),
         primary_key: vec!["id".into(), "wave".into()],
     };
     let table = Table::parse(b"id,wave,hp\n1,2,100\n1,10,200\n", &def).unwrap();
@@ -69,7 +68,7 @@ fn write(root: &Path, data: &ProjectData) {
     fs::write(root.join(CONFIG_PATH), data.config.serialize().unwrap()).unwrap();
     for (id, def) in &data.config.masters {
         let m = data.masters[id].data.as_ref().unwrap();
-        fs::write(root.join(&def.path), m.table.serialize(def).unwrap()).unwrap();
+        fs::write(root.join(csv_path(id)), m.table.serialize(def).unwrap()).unwrap();
         let path = root.join(format!("gamemasterstudio/comments/{id}.json"));
         match m.comments.serialize().unwrap() {
             Some(b) => fs::write(path, b).unwrap(),

@@ -12,7 +12,7 @@ export function describeChange(change: SemanticChange): string {
     case "projectConfig":
       return `Protected Branches: ${change.before?.protectedBranches.join(", ") ?? "（未設定）"} → ${change.after.protectedBranches.join(", ") || "（なし）"}`;
     case "masterDefinition":
-      return `Master 定義: ${change.before.path} / ${JSON.stringify(change.before.primaryKey)} → ${change.after.path} / ${JSON.stringify(change.after.primaryKey)}`;
+      return `Primary Key: ${JSON.stringify(change.before.primaryKey)} → ${JSON.stringify(change.after.primaryKey)}`;
     case "addedRow": case "deletedRow":
       return `${change.kind === "addedRow" ? "+ Added" : "− Deleted"} Row ${JSON.stringify(change.primaryKey)}`;
     case "addedColumn": case "deletedColumn":

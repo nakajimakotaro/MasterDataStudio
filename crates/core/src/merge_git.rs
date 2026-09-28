@@ -1,7 +1,7 @@
 //! Git adapter. Unmerged paths are read exclusively from index stages, never the working tree.
 use crate::{
     comments::{Comment, Comments, Identity},
-    config::{ProjectConfig, CONFIG_PATH},
+    config::{csv_path, ProjectConfig, CONFIG_PATH},
     csv_data::Table,
     merge::{merge_project, MergePlan, MergeView, Resolution},
     project::{git, git_bytes, Master, MasterEntry, Project, ProjectData, Snapshot},
@@ -79,8 +79,9 @@ fn read_side(root: &Path, stages: &Stages, side: u8, revision: &str) -> Result<P
     let mut masters = BTreeMap::new();
     for (id, def) in &config.masters {
         let data = (|| -> Result<Master> {
-            let bytes = source_blob(root, stages, side, revision, &def.path)?
-                .ok_or_else(|| format!("{id}: {} が stage {side} にありません。", def.path))?;
+            let path = csv_path(id);
+            let bytes = source_blob(root, stages, side, revision, &path)?
+                .ok_or_else(|| format!("{id}: {path} が stage {side} にありません。"))?;
             let table = Table::parse(&bytes, def)?;
             let mut comments: Comments =
                 source_blob(root, stages, side, revision, &comment_path(id))?
@@ -129,8 +130,8 @@ fn comment_path(id: &str) -> String {
 }
 fn paths(data: &ProjectData) -> BTreeSet<String> {
     let mut out = BTreeSet::from([CONFIG_PATH.into()]);
-    for (id, def) in &data.config.masters {
-        out.insert(def.path.clone());
+    for id in data.config.masters.keys() {
+        out.insert(csv_path(id));
         out.insert(comment_path(id));
         out.insert(script_path(id));
     }
@@ -427,7 +428,7 @@ impl Project {
                 .data
                 .as_ref()
                 .ok_or("Master がありません。")?;
-            outputs.insert(def.path.clone(), Some(master.table.serialize(def)?));
+            outputs.insert(csv_path(id), Some(master.table.serialize(def)?));
             outputs.insert(comment_path(id), master.comments.serialize()?);
             outputs.insert(script_path(id), master.scripts.serialize()?);
         }

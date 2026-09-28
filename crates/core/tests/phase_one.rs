@@ -10,7 +10,6 @@ use std::{fs, path::Path};
 
 fn definition() -> MasterDefinition {
     MasterDefinition {
-        path: "masters/waves.csv".into(),
         primary_key: vec!["stage".into(), "wave".into()],
     }
 }
@@ -80,48 +79,27 @@ fn invalid_csv_and_keys_are_rejected() {
 }
 
 #[test]
-fn config_validates_identity_paths_version_and_primary_key() {
-    let make = |id: &str, path: &str| {
-        format!(
-            "version: 1\nmasters:\n  {id}:\n    path: '{path}'\n    primaryKey: [stage, wave]\n"
-        )
-    };
-    assert!(ProjectConfig::parse(b"version: 1\nmasters:\n  enemy: {path: a.csv, primaryKey: [id]}\n  Enemy: {path: b.csv, primaryKey: [id]}\n").is_err());
-    for path in [
-        "/tmp/data.csv",
-        "../data.csv",
-        "masters/../data.csv",
-        "C:\\data.csv",
-        ".git/data.csv",
-        "gamemasterstudio/data.csv",
-        "masters//data.csv",
-        "masters/./data.csv",
-    ] {
-        assert!(
-            ProjectConfig::parse(make("waves", path).as_bytes()).is_err(),
-            "Accepted {path}"
-        );
-    }
+fn config_validates_identity_version_and_primary_key() {
+    let make = |id: &str| format!("version: 1\nmasters:\n  {id}:\n    primaryKey: [stage, wave]\n");
+    assert!(ProjectConfig::parse(
+        b"version: 1\nmasters:\n  enemy: {primaryKey: [id]}\n  Enemy: {primaryKey: [id]}\n"
+    )
+    .is_err());
     for id in ["../x", "_waves", "wave.id"] {
-        assert!(ProjectConfig::parse(make(id, "masters/waves.csv").as_bytes()).is_err());
+        assert!(ProjectConfig::parse(make(id).as_bytes()).is_err());
     }
-    let config =
-        ProjectConfig::parse(make("stage_enemy", "masters\\waves.csv").as_bytes()).unwrap();
-    assert_eq!(config.masters["stage_enemy"].path, "masters/waves.csv");
+    let config = ProjectConfig::parse(make("stage_enemy").as_bytes()).unwrap();
     assert_eq!(
         ProjectConfig::parse(&config.serialize().unwrap()).unwrap(),
         config
     );
     assert!(ProjectConfig::parse(b"version: 2\nmasters: {}\n").is_err());
+    assert!(ProjectConfig::parse(b"version: 1\nmasters:\n  a: {primaryKey: []}\n").is_err());
+    assert!(ProjectConfig::parse(b"version: 1\nmasters:\n  a: {primaryKey: [id,id]}\n").is_err());
     assert!(
-        ProjectConfig::parse(b"version: 1\nmasters:\n  a: {path: a.csv, primaryKey: []}\n")
+        ProjectConfig::parse(b"version: 1\nmasters:\n  a: {path: a.csv, primaryKey: [id]}\n")
             .is_err()
     );
-    assert!(ProjectConfig::parse(
-        b"version: 1\nmasters:\n  a: {path: a.csv, primaryKey: [id,id]}\n"
-    )
-    .is_err());
-    assert!(ProjectConfig::parse(b"version: 1\nmasters:\n  a: {path: a.csv, primaryKey: [id]}\n  b: {path: a.csv, primaryKey: [id]}\n").is_err());
 }
 
 fn fixture() -> (tempfile::TempDir, Project) {
@@ -135,7 +113,6 @@ fn fixture() -> (tempfile::TempDir, Project) {
         &mut project,
         Operation::CreateMaster {
             master_id: "waves".into(),
-            path: "masters/waves.csv".into(),
             primary_key: vec!["stage".into(), "wave".into()],
             columns: vec!["stage".into(), "wave".into(), "name".into(), "note".into()],
         },
@@ -571,7 +548,6 @@ fn invalid_master_is_isolated_and_never_overwritten() {
         &mut project,
         Operation::CreateMaster {
             master_id: "other".into(),
-            path: "other.csv".into(),
             primary_key: vec!["id".into()],
             columns: vec!["id".into()],
         },
@@ -594,17 +570,18 @@ fn invalid_master_is_isolated_and_never_overwritten() {
 
 #[test]
 fn empty_master_can_be_configured_but_populated_master_cannot() {
-    let (dir, mut project) = fixture();
+    let (_dir, mut project) = fixture();
     apply(
         &mut project,
         Operation::ConfigureMaster {
             master_id: "waves".into(),
-            path: "data/waves.csv".into(),
             primary_key: vec!["wave".into()],
         },
     );
-    assert!(dir.path().join("data/waves.csv").exists());
-    assert!(!dir.path().join("masters/waves.csv").exists());
+    assert_eq!(
+        project.full_snapshot().data.config.masters["waves"].primary_key,
+        vec!["wave"]
+    );
     apply(
         &mut project,
         Operation::AddRow {
@@ -617,7 +594,6 @@ fn empty_master_can_be_configured_but_populated_master_cannot() {
         .apply(
             Operation::ConfigureMaster {
                 master_id: "waves".into(),
-                path: "other/waves.csv".into(),
                 primary_key: vec!["wave".into()]
             },
             project.snapshot().revision

@@ -8,7 +8,7 @@ import { masterColumn, masterGridTheme } from "./MasterGrid";
 import { buildReviewTable, changeTone, type ReviewRow, type ReviewTone } from "./reviewModel";
 import { Pager } from "./ReviewControls";
 import { useUI } from "./store";
-import type { ChangeReviewData, SemanticChange, Snapshot } from "./types";
+import { csvPath, type ChangeReviewData, type SemanticChange, type Snapshot } from "./types";
 
 const labels: Record<ReviewTone, string> = { added: "追加", modified: "変更", deleted: "削除" };
 function Badge({ tone }: { tone: ReviewTone }) {
@@ -110,7 +110,7 @@ function ReviewMaster({ data, masterId, disabled }: { data: ChangeReviewData; ma
   return <div className="editor review-editor">
     <div className="editor-heading">
       <div className="breadcrumb">Change Review <span>/</span> {masterId}</div>
-      <div className="editor-title"><h1>{masterId === "(Project Settings)" ? "Project Settings" : masterId}</h1><span className="badge">閲覧専用</span>{table && <code>{table.def.path}</code>}</div>
+      <div className="editor-title"><h1>{masterId === "(Project Settings)" ? "Project Settings" : masterId}</h1><span className="badge">閲覧専用</span>{table && <code>{csvPath(masterId)}</code>}</div>
     </div>
     {table && <div className="editor-toolbar review-toolbar">
       <div className="review-legend" aria-label="差分の色"><Badge tone="added" /><Badge tone="modified" /><Badge tone="deleted" /></div>

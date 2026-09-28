@@ -1,6 +1,6 @@
 use crate::{
     comments::{CommentTarget, Comments, Identity},
-    config::{validate_column, GitConfig, MasterDefinition, ProjectConfig, CONFIG_PATH},
+    config::{csv_path, validate_column, GitConfig, MasterDefinition, ProjectConfig, CONFIG_PATH},
     csv_data::{PrimaryKey, Table},
     scripts::{CalculatedCell, ColumnScript, PreparedEdit, Scripts},
     storage::{self, FileChange},
@@ -299,13 +299,11 @@ pub enum Operation {
     },
     CreateMaster {
         master_id: String,
-        path: String,
         primary_key: Vec<String>,
         columns: Vec<String>,
     },
     ConfigureMaster {
         master_id: String,
-        path: String,
         primary_key: Vec<String>,
     },
 }
@@ -430,9 +428,10 @@ impl Project {
                 continue;
             }
             let load = || -> Result<Master> {
-                let path = storage::safe_path(root, &def.path)?;
+                let path = csv_path(id);
                 let table = Table::parse(
-                    &fs::read(path).map_err(|e| format!("{}: {e}", def.path))?,
+                    &fs::read(storage::safe_path(root, &path)?)
+                        .map_err(|e| format!("{path}: {e}"))?,
                     def,
                 )?;
                 let comment_path =
@@ -915,7 +914,6 @@ impl Project {
             }
             Operation::CreateMaster {
                 master_id,
-                path,
                 primary_key,
                 columns,
             } => {
@@ -924,10 +922,9 @@ impl Project {
                 }
                 next.config
                     .masters
-                    .insert(master_id.clone(), MasterDefinition { path, primary_key });
+                    .insert(master_id.clone(), MasterDefinition { primary_key });
                 next.config.validate()?;
-                let def = &next.config.masters[&master_id];
-                if storage::safe_path(&self.root, &def.path)?.exists()
+                if storage::safe_path(&self.root, &csv_path(&master_id))?.exists()
                     || storage::safe_path(
                         &self.root,
                         &format!("gamemasterstudio/comments/{master_id}.json"),
@@ -940,8 +937,7 @@ impl Project {
                     .exists()
                 {
                     return Err(
-                        "保存先に既存ファイルがあります。別の path / ID を指定してください。"
-                            .into(),
+                        "保存先に既存ファイルがあります。別の ID を指定してください。".into(),
                     );
                 }
                 let table = Table {
@@ -963,24 +959,16 @@ impl Project {
             }
             Operation::ConfigureMaster {
                 master_id,
-                path,
                 primary_key,
             } => {
-                let (master, old) = get_master(&mut next, &master_id)?;
+                let (master, _) = get_master(&mut next, &master_id)?;
                 if !master.table.rows.is_empty() {
-                    return Err(
-                        "Row が存在する Master の path / Primary Key は変更できません。".into(),
-                    );
+                    return Err("Row が存在する Master の Primary Key は変更できません。".into());
                 }
-                let old_path = old.path.clone();
                 next.config
                     .masters
-                    .insert(master_id.clone(), MasterDefinition { path, primary_key });
+                    .insert(master_id.clone(), MasterDefinition { primary_key });
                 next.config.validate()?;
-                let def = &next.config.masters[&master_id];
-                if def.path != old_path && storage::safe_path(&self.root, &def.path)?.exists() {
-                    return Err("保存先に既存ファイルがあります。".into());
-                }
             }
             Operation::EditCells { master_id, edits } => {
                 let (master, def) = get_master(&mut next, &master_id)?;
@@ -1401,8 +1389,8 @@ impl Project {
     fn managed_paths(&self) -> Result<BTreeSet<String>> {
         let mut paths = BTreeSet::from([CONFIG_PATH.to_string()]);
         for config in std::iter::once(self.data.config.clone()).chain(self.head_config()?) {
-            for (id, def) in config.masters {
-                paths.insert(def.path);
+            for id in config.masters.keys() {
+                paths.insert(csv_path(id));
                 for kind in ["comments", "scripts"] {
                     let path = format!("gamemasterstudio/{kind}/{id}.json");
                     if storage::safe_path(&self.root, &path)?.exists()
@@ -1443,7 +1431,7 @@ impl Project {
             }
             let load = || -> Result<Master> {
                 let table = Table::parse(
-                    &git_bytes(&self.root, &["show", &format!("HEAD:{}", def.path)])?,
+                    &git_bytes(&self.root, &["show", &format!("HEAD:{}", csv_path(id))])?,
                     def,
                 )?;
                 let comments = match git_bytes(
@@ -1538,8 +1526,8 @@ impl Project {
         }
         let mut masters = BTreeSet::new();
         for config in before.iter().chain(std::iter::once(&self.data.config)) {
-            for (id, def) in &config.masters {
-                if paths.contains(&def.path)
+            for id in config.masters.keys() {
+                if paths.contains(&csv_path(id))
                     || paths.contains(&format!("gamemasterstudio/comments/{id}.json"))
                     || before.as_ref().and_then(|c| c.masters.get(id))
                         != self.data.config.masters.get(id)
@@ -2058,8 +2046,7 @@ fn files_where(
             continue;
         }
         if let Some(master) = &entry.data {
-            let def = &data.config.masters[id];
-            files.insert(def.path.clone(), master.table.serialize_canonical()?);
+            files.insert(csv_path(id), master.table.serialize_canonical()?);
             if let Some(bytes) = master.scripts.serialize()? {
                 files.insert(format!("gamemasterstudio/scripts/{id}.json"), bytes);
             }

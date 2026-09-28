@@ -7,7 +7,6 @@ pub const CONFIG_PATH: &str = "gamemasterstudio/project.yaml";
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MasterDefinition {
-    pub path: String,
     pub primary_key: Vec<String>,
 }
 
@@ -43,27 +42,12 @@ pub fn validate_column(name: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn normalize_csv_path(path: &str) -> Result<String> {
-    let path = path.replace('\\', "/");
-    if path.is_empty()
-        || path.starts_with('/')
-        || path.contains([':', '\0'])
-        || path.split('/').any(|p| {
-            p.is_empty()
-                || p == ".."
-                || p == "."
-                || p.eq_ignore_ascii_case(".git")
-                || p.eq_ignore_ascii_case("gamemasterstudio")
-        })
-        || !path.ends_with(".csv")
-    {
-        return Err("CSV path は Repository 内の相対パス（.csv）にしてください。絶対パス、..、予約ディレクトリは使用できません。".into());
-    }
-    Ok(path)
+pub fn csv_path(id: &str) -> String {
+    format!("masters/{id}.csv")
 }
 
 impl ProjectConfig {
-    pub fn validate(&mut self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         if self.version != 1 {
             return Err(format!("未対応の Project Config version: {}", self.version));
         }
@@ -84,9 +68,8 @@ impl ProjectConfig {
                 ));
             }
         }
-        let mut paths = BTreeSet::new();
-        let mut comment_paths = BTreeSet::new();
-        for (id, def) in &mut self.masters {
+        let mut ids = BTreeSet::new();
+        for (id, def) in &self.masters {
             if id.is_empty()
                 || !id.as_bytes()[0].is_ascii_alphanumeric()
                 || !id
@@ -95,15 +78,11 @@ impl ProjectConfig {
             {
                 return Err(format!("Master ID が不正です: {id}"));
             }
-            if !comment_paths.insert(id.to_ascii_lowercase()) {
+            // Case-fold, so repositories remain portable to case-insensitive filesystems.
+            if !ids.insert(id.to_ascii_lowercase()) {
                 return Err(format!(
-                    "Comment file の path が衝突する Master ID です: {id}"
+                    "大文字・小文字だけが異なる Master ID は使用できません: {id}"
                 ));
-            }
-            def.path = normalize_csv_path(&def.path)?;
-            // Case-fold as well, so repositories remain portable to case-insensitive filesystems.
-            if !paths.insert(def.path.to_lowercase()) {
-                return Err(format!("CSV path が重複しています: {}", def.path));
             }
             if def.primary_key.is_empty() {
                 return Err(format!("{id}: Primary Key を 1 つ以上指定してください。"));
@@ -120,7 +99,7 @@ impl ProjectConfig {
     }
 
     pub fn parse(bytes: &[u8]) -> Result<Self> {
-        let mut config: Self =
+        let config: Self =
             serde_yaml::from_slice(bytes).map_err(|e| format!("Project Config: {e}"))?;
         config.validate()?;
         Ok(config)

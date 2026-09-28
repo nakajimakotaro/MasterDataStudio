@@ -23,7 +23,8 @@ export type Master = {
   table: { columns: string[]; rows: string[][] };
   comments: Comments;
 };
-export type Definition = { path: string; primaryKey: string[] };
+export type Definition = { primaryKey: string[] };
+export const csvPath = (masterId: string) => `masters/${masterId}.csv`;
 export type Snapshot = {
   gitStale?: boolean;
   safeMode?: boolean;
@@ -100,14 +101,12 @@ export type Operation =
   | {
       type: "createMaster";
       masterId: string;
-      path: string;
       primaryKey: string[];
       columns: string[];
     }
   | {
       type: "configureMaster";
       masterId: string;
-      path: string;
       primaryKey: string[];
     };
 

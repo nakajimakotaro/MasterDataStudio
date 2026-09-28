@@ -15,7 +15,6 @@ fn fixture(rows: usize) -> (tempfile::TempDir, Project) {
         p.apply(
             Operation::CreateMaster {
                 master_id: id.into(),
-                path: format!("{id}.csv"),
                 primary_key: vec!["id".into()],
                 columns: vec!["id".into(), "value".into(), "computed".into()],
             },
@@ -30,7 +29,7 @@ fn fixture(rows: usize) -> (tempfile::TempDir, Project) {
             .collect::<String>()
     );
     for id in ["a", "b"] {
-        fs::write(dir.path().join(format!("{id}.csv")), &csv).unwrap();
+        fs::write(dir.path().join(format!("masters/{id}.csv")), &csv).unwrap();
     }
     let mut p = Project::open(dir.path()).unwrap();
     p.commit("initial", false).unwrap();
@@ -109,7 +108,6 @@ fn updates_reconstruct_full_snapshots_through_structural_edits() {
         },
         Operation::ConfigureMaster {
             master_id: "a".into(),
-            path: "renamed.csv".into(),
             primary_key: vec!["id".into()],
         },
         Operation::SetProtectedBranches {
@@ -117,7 +115,6 @@ fn updates_reconstruct_full_snapshots_through_structural_edits() {
         },
         Operation::CreateMaster {
             master_id: "new".into(),
-            path: "new.csv".into(),
             primary_key: vec!["id".into()],
             columns: vec!["id".into()],
         },
@@ -357,7 +354,7 @@ fn git_trace_edit_scenario() {
 fn workspace_and_git_reads_do_not_load_or_retain_master_contents() {
     let (dir, p) = fixture(3);
     // Table contents can become unreadable without breaking the workspace or Git dialogs.
-    fs::write(dir.path().join("b.csv"), "invalid CSV").unwrap();
+    fs::write(dir.path().join("masters/b.csv"), "invalid CSV").unwrap();
     let snapshot = p.snapshot();
     assert_eq!(snapshot.data.config.masters.len(), 2);
     assert!(snapshot.data.masters.is_empty());
@@ -377,10 +374,10 @@ fn workspace_and_git_reads_do_not_load_or_retain_master_contents() {
 #[test]
 fn edits_and_reviews_read_only_the_target_and_use_saved_files() {
     let (dir, mut p) = fixture(3);
-    fs::write(dir.path().join("b.csv"), "unrelated invalid CSV").unwrap();
+    fs::write(dir.path().join("masters/b.csv"), "unrelated invalid CSV").unwrap();
     // Reading and editing uses the file, not a project-open copy of its rows.
     fs::write(
-        dir.path().join("a.csv"),
+        dir.path().join("masters/a.csv"),
         "id,value,computed\n000000,disk value,\n000001,keep me,\n",
     )
     .unwrap();
@@ -395,7 +392,7 @@ fn edits_and_reviews_read_only_the_target_and_use_saved_files() {
     assert_eq!(master.table.rows[0][1], "edited");
     assert_eq!(master.table.rows[1][1], "keep me");
     assert_eq!(
-        fs::read_to_string(dir.path().join("b.csv")).unwrap(),
+        fs::read_to_string(dir.path().join("masters/b.csv")).unwrap(),
         "unrelated invalid CSV"
     );
     let review = p.review_master(update.revision, "a").unwrap();
@@ -417,7 +414,6 @@ fn review_summary_handles_untracked_staged_deleted_and_config_changes() {
         .apply_calculated_update(
             Operation::CreateMaster {
                 master_id: "new".into(),
-                path: "new.csv".into(),
                 primary_key: vec!["id".into()],
                 columns: vec!["id".into()],
             },
@@ -429,10 +425,10 @@ fn review_summary_handles_untracked_staged_deleted_and_config_changes() {
         p.review_summary(update.revision).unwrap().masters,
         vec!["new"]
     );
-    git(dir.path(), &["add", "a.csv"]).unwrap();
+    git(dir.path(), &["add", "masters/a.csv"]).unwrap();
     p.apply_calculated_update(edit(), vec![], update.revision)
         .unwrap();
-    git(dir.path(), &["add", "a.csv"]).unwrap();
+    git(dir.path(), &["add", "masters/a.csv"]).unwrap();
     assert_eq!(
         p.review_summary(p.snapshot().revision).unwrap().masters,
         vec!["a", "new"]
@@ -445,7 +441,7 @@ fn review_summary_handles_untracked_staged_deleted_and_config_changes() {
         config.serialize().unwrap(),
     )
     .unwrap();
-    fs::remove_file(dir.path().join("b.csv")).unwrap();
+    fs::remove_file(dir.path().join("masters/b.csv")).unwrap();
     let p = Project::open(dir.path()).unwrap();
     assert_eq!(p.review_summary(0).unwrap().masters, vec!["a", "b", "new"]);
     let review = p.review_master(0, "b").unwrap();
@@ -460,7 +456,7 @@ fn review_summary_handles_untracked_staged_deleted_and_config_changes() {
 #[test]
 fn settings_review_and_script_discovery_do_not_require_csv_data() {
     let (dir, mut p) = fixture(3);
-    fs::write(dir.path().join("b.csv"), "invalid").unwrap();
+    fs::write(dir.path().join("masters/b.csv"), "invalid").unwrap();
     fs::create_dir_all(dir.path().join("gamemasterstudio/scripts")).unwrap();
     fs::write(
         dir.path().join("gamemasterstudio/scripts/a.json"),
@@ -505,7 +501,7 @@ fn large_master_edit_timing() {
         .chain(std::iter::once("value".to_string()))
         .chain((2..30).map(|i| format!("column{i}")))
         .collect::<Vec<_>>();
-    let mut writer = csv::Writer::from_path(dir.path().join("a.csv")).unwrap();
+    let mut writer = csv::Writer::from_path(dir.path().join("masters/a.csv")).unwrap();
     writer.write_record(&columns).unwrap();
     for i in 0..333_332 {
         let mut row = vec!["12345678".to_string(); 30];

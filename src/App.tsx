@@ -25,7 +25,7 @@ import {
   useRepositoryAction,
 } from "./api";
 import { useUI } from "./store";
-import type { Snapshot } from "./types";
+import { csvPath, type Snapshot } from "./types";
 import { ConflictResolver } from "./ConflictResolver";
 import { Editor } from "./Editor";
 import { ProjectDialogs } from "./Dialogs";
@@ -361,7 +361,7 @@ function Workspace({ project }: { project: Snapshot }) {
                 <h1>{masterId}</h1>
                 <h2>この Master を読み込めません</h2>
                 <p>{entry.error}</p>
-                <code>{project.data.config.masters[masterId].path}</code>
+                <code>{csvPath(masterId)}</code>
                 <p className="hint">
                   不正な Master は編集できません。設定・データを確認し、Project
                   を開き直してください。
@@ -439,7 +439,7 @@ function Dashboard({ project }: { project: Snapshot }) {
                 </span>
                 <span>
                   <strong>{id}</strong>
-                  <small>{definition.path}</small>
+                  <small>{csvPath(id)}</small>
                 </span>
               </span>
               <span className="pk-tags">

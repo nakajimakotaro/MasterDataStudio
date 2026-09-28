@@ -25,6 +25,7 @@ import { useBusy, useRepositoryAction } from "./api";
 import { useUI, type DraftRow } from "./store";
 import {
   keyId,
+  csvPath,
   type CellEdit,
   type Comment,
   type CommentTarget,
@@ -369,7 +370,7 @@ export function Editor({
             comment={master.comments.table}
             editable={editable}
           />
-          <code>{def.path}</code>
+          <code>{csvPath(masterId)}</code>
           <button
             className="icon-button"
             aria-label="Master Settings"
