@@ -27,7 +27,7 @@ VITE_AG_GRID_LICENSE_KEY=your-license-key
 
 ## 使い方
 
-1. 起動画面で **Repository を開く** を選択します。未設定の場合は **Project を初期化** で既存のフォルダを選択します。Git Repository がなければ `git init -b main` を実行します。既存 Repository のサブフォルダを選ぶと、その Repository のルートを使用します。
+1. 起動画面で **Repository を開く** を選択します。未設定の場合は **Project を初期化** で既存のフォルダを選択します。Git Repository がなければ `git init -b main` を実行し、`gamemasterstudio/project.yaml` を作成します。**Repository を開く** では、`gamemasterstudio/project.yaml` がある Repository のルートフォルダを選択してください。それ以外のフォルダ（サブフォルダを含む）は開けません。既存 Repository のサブフォルダは初期化できません。
 2. Git Identity が未設定の場合、**Project Settings** で名前とメールアドレスを設定します。Repository-local の Git config に保存します。未設定でも閲覧できます。
 3. **Master を作成** で ID、Column 一覧、Primary Key を入力します。データは `masters/<ID>.csv` に保存されます。Columns / Primary Key はそれぞれ 1 行に 1 つ入力します。複合キーの順序は Primary Key の入力順です。
 4. Master を開き、セルのダブルクリックで編集します。Row 追加・複製・削除、Column 追加・削除はツールバーから操作します。

@@ -641,6 +641,22 @@ fn symlink_paths_are_rejected_including_metadata_directory() {
 }
 
 #[test]
+fn only_repository_roots_with_project_config_can_be_opened() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(Project::open(dir.path()).is_err());
+    assert!(!dir.path().join(".git").exists());
+    git(dir.path(), &["init", "-b", "main"]).unwrap();
+    assert!(Project::open(dir.path()).is_err());
+    fs::create_dir(dir.path().join("sub")).unwrap();
+    assert!(Project::initialize(&dir.path().join("sub")).is_err());
+    assert!(!dir.path().join("sub/gamemasterstudio").exists());
+    Project::initialize(dir.path()).unwrap();
+    assert!(Project::open(&dir.path().join("sub")).is_err());
+    assert!(Project::open(&dir.path().join("gamemasterstudio")).is_err());
+    Project::open(dir.path()).unwrap();
+}
+
+#[test]
 fn comment_json_order_is_tuple_then_column_and_orphans_are_errors() {
     let def = definition();
     let table = Table::parse(b"stage,wave,name,note\na,1,,\na,2,,\n", &def).unwrap();

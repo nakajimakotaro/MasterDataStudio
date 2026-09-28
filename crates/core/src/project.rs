@@ -382,7 +382,15 @@ impl Project {
     }
 
     pub fn open(path: &Path) -> Result<Self> {
-        let root = repository_root(path)?;
+        let not_project = || format!("Project ではありません: {}", path.display());
+        let root = fs::canonicalize(path).map_err(|_| not_project())?;
+        if !storage::safe_path(&root, CONFIG_PATH)
+            .map_err(|_| not_project())?
+            .is_file()
+            || repository_root(&root).ok().as_ref() != Some(&root)
+        {
+            return Err(not_project());
+        }
         if git(&root, &["rev-parse", "--verify", "MERGE_HEAD"]).is_ok() {
             let config = ProjectConfig::parse(&git_bytes(
                 &root,
@@ -403,8 +411,7 @@ impl Project {
             });
         }
         let config_path = storage::safe_path(&root, CONFIG_PATH)?;
-        let bytes = storage::read_optional(&config_path)?
-            .ok_or("Project Config がありません。「Project を初期化」を使用してください。")?;
+        let bytes = storage::read_optional(&config_path)?.ok_or_else(not_project)?;
         let config = ProjectConfig::parse(&bytes)?;
         Ok(Self {
             safe_mode: false,
@@ -545,7 +552,13 @@ impl Project {
         }
         let selected = fs::canonicalize(path).map_err(|e| e.to_string())?;
         let root = match repository_root(&selected) {
-            Ok(root) => root,
+            Ok(root) if root == selected => root,
+            Ok(_) => {
+                return Err(format!(
+                    "このフォルダは初期化できません: {}",
+                    selected.display()
+                ))
+            }
             Err(_) => {
                 git(&selected, &["init", "-b", "main"])?;
                 selected
